@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: commercepilot-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-commercepilot}
+      POSTGRES_USER: ${POSTGRES_USER:-commercepilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commercepilot}
+    ports:
+      - "5433:5432"
+    volumes:
+      - commercepilot_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  commercepilot_postgres_data:
+
