@@ -5,7 +5,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from commercepilot.models.enums import PriceChangeType
+from commercepilot.models.enums import (
+    CompetitiveThreatLevel,
+    ImprovementPriority,
+    PriceChangeType,
+)
 
 
 class CompetitorCreate(BaseModel):
@@ -87,6 +91,8 @@ class CompetitorPriceSnapshotRead(CompetitorPriceSnapshotCreate):
 
 class CompetitorPriceChange(BaseModel):
     competitor_product_id: UUID
+    current_snapshot_id: UUID
+    previous_snapshot_id: UUID | None
     competitor_name: str
     competitor_product_name: str
     previous_price: Decimal | None
@@ -99,3 +105,45 @@ class CompetitorPriceChange(BaseModel):
     is_cheaper_than_ours: bool
     promotion: str | None
     observed_at: datetime
+
+
+class CompetitorEvidenceSet(BaseModel):
+    product_id: UUID
+    product_sku: str
+    product_name: str
+    our_price: Decimal
+    currency: str
+    price_changes: list[CompetitorPriceChange]
+
+
+class CompetitorFinding(BaseModel):
+    competitor_product_id: UUID
+    competitor_name: str = Field(min_length=2, max_length=255)
+    threat_level: CompetitiveThreatLevel
+    summary: str = Field(min_length=10, max_length=750)
+    evidence_snapshot_ids: list[UUID] = Field(min_length=1)
+
+
+class CompetitiveRecommendation(BaseModel):
+    recommendation: str = Field(min_length=10, max_length=500)
+    rationale: str = Field(min_length=10, max_length=750)
+    priority: ImprovementPriority
+    evidence_snapshot_ids: list[UUID] = Field(min_length=1)
+
+
+class CompetitorInsight(BaseModel):
+    product_sku: str = Field(
+        min_length=3,
+        max_length=64,
+        pattern=r"^[A-Z0-9-]+$",
+    )
+    overall_threat_level: CompetitiveThreatLevel
+    market_summary: str = Field(min_length=20, max_length=1000)
+    findings: list[CompetitorFinding] = Field(min_length=1)
+    recommended_actions: list[CompetitiveRecommendation]
+    confidence: float = Field(ge=0, le=1)
+
+    @field_validator("product_sku", mode="before")
+    @classmethod
+    def uppercase_product_sku(cls, value: str) -> str:
+        return value.strip().upper()

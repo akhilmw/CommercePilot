@@ -10,7 +10,10 @@ from commercepilot.db.models import (
     CompetitorProduct,
     Product,
 )
-from commercepilot.models.competitor import CompetitorPriceChange
+from commercepilot.models.competitor import (
+    CompetitorEvidenceSet,
+    CompetitorPriceChange,
+)
 from commercepilot.models.enums import PriceChangeType
 from commercepilot.services.market_simulation import calculate_price_change
 
@@ -28,10 +31,10 @@ def classify_price_change(
     return PriceChangeType.UNCHANGED
 
 
-def analyze_competitor_prices(
+def load_competitor_evidence(
     session: Session,
     product_sku: str,
-) -> list[CompetitorPriceChange]:
+) -> CompetitorEvidenceSet:
     product = session.scalar(select(Product).where(Product.sku == product_sku))
     if product is None:
         raise ValueError(f"Unknown product SKU: {product_sku}")
@@ -83,6 +86,8 @@ def analyze_competitor_prices(
         changes.append(
             CompetitorPriceChange(
                 competitor_product_id=competitor_product.id,
+                current_snapshot_id=current.id,
+                previous_snapshot_id=previous.id if previous is not None else None,
                 competitor_name=competitor.name,
                 competitor_product_name=competitor_product.name,
                 previous_price=previous_price,
@@ -101,4 +106,21 @@ def analyze_competitor_prices(
             )
         )
 
-    return sorted(changes, key=lambda change: change.competitor_name)
+    return CompetitorEvidenceSet(
+        product_id=product.id,
+        product_sku=product.sku,
+        product_name=product.name,
+        our_price=product.price,
+        currency=product.currency,
+        price_changes=sorted(
+            changes,
+            key=lambda change: change.competitor_name,
+        ),
+    )
+
+
+def analyze_competitor_prices(
+    session: Session,
+    product_sku: str,
+) -> list[CompetitorPriceChange]:
+    return load_competitor_evidence(session, product_sku).price_changes
