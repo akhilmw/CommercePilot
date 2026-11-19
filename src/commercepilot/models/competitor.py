@@ -137,6 +137,12 @@ class CompetitorInsight(BaseModel):
         max_length=64,
         pattern=r"^[A-Z0-9-]+$",
     )
+    our_price: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+    currency: str = Field(
+        min_length=3,
+        max_length=3,
+        pattern=r"^[A-Z]{3}$",
+    )
     overall_threat_level: CompetitiveThreatLevel
     market_summary: str = Field(min_length=20, max_length=1000)
     findings: list[CompetitorFinding] = Field(min_length=1)

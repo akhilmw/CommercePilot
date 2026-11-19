@@ -1,3 +1,6 @@
+import asyncio
+from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -7,10 +10,42 @@ from commercepilot.graph.orchestrator_graph import build_orchestrator_graph
 from commercepilot.graph.orchestrator_state import CommercePilotState
 
 
-def main() -> None:
+def format_approval_action(action: dict[str, Any]) -> list[str]:
+    lines = [f"- {action['action_type']}: {action['title']}"]
+    price_change = action.get("price_change")
+    if action["action_type"] != "change_price" or price_change is None:
+        lines.append(f"  Reason: {action['rationale']}")
+        return lines
+
+    current_price = Decimal(price_change["expected_current_price"])
+    new_price = Decimal(price_change["new_price"])
+    currency = price_change["currency"]
+    difference = new_price - current_price
+    percent_change = (
+        difference / current_price * Decimal("100")
+        if current_price
+        else Decimal("0")
+    )
+
+    lines.extend(
+        [
+            f"  SKU: {price_change['sku']}",
+            f"  Current price: {currency} {current_price:.2f}",
+            f"  Proposed price: {currency} {new_price:.2f}",
+            (
+                f"  Change: {currency} {difference:+.2f} "
+                f"({percent_change:+.2f}%)"
+            ),
+            f"  Reason: {action['rationale']}",
+        ]
+    )
+    return lines
+
+
+async def main() -> None:
     graph = build_orchestrator_graph(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": str(uuid4())}}
-    result = graph.invoke(
+    result = await graph.ainvoke(
         CommercePilotState(
             product_sku="NOVA-AUDIO-001",
             review_insight=None,
@@ -18,6 +53,8 @@ def main() -> None:
             strategy=None,
             approval_policy=None,
             approval_decision=None,
+            approved_action_ids=[],
+            execution_results=[],
             review_error=None,
             competitor_error=None,
             error=None,
@@ -32,11 +69,12 @@ def main() -> None:
         print(f"Product: {payload['product_sku']}")
         print("\nPending actions:")
         for action in payload["actions"]:
-            print(f"- {action['action_type']}: {action['title']}")
+            for line in format_approval_action(action):
+                print(line)
 
         answer = input("\nApprove these actions? [y/N]: ").strip().lower()
         comment = input("Optional comment: ").strip() or None
-        result = graph.invoke(
+        result = await graph.ainvoke(
             Command(
                 resume={
                     "approved": answer in {"y", "yes"},
@@ -73,7 +111,14 @@ def main() -> None:
         print(f"Human approved: {decision.approved}")
         if decision.comment is not None:
             print(f"Comment: {decision.comment}")
+    if result["execution_results"]:
+        print("\nMCP execution results:")
+        for execution in result["execution_results"]:
+            print(
+                f"- {execution.sku}: {execution.previous_price} -> "
+                f"{execution.current_price} ({execution.status})"
+            )
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

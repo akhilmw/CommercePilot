@@ -29,6 +29,10 @@ def validate_competitor_insight_evidence(
         raise ValueError(
             "Competitor insight product SKU does not match the evidence set."
         )
+    if insight.our_price != evidence.our_price:
+        raise ValueError("Competitor insight price does not match the evidence set.")
+    if insight.currency != evidence.currency:
+        raise ValueError("Competitor insight currency does not match the evidence set.")
 
     products_by_id = {
         change.competitor_product_id: change

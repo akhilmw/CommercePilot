@@ -1,12 +1,38 @@
+from decimal import Decimal
+from typing import Self
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from commercepilot.models.enums import (
     ActionType,
     ImprovementPriority,
     SourceAgent,
 )
+
+
+class PriceChangeParameters(BaseModel):
+    sku: str = Field(
+        min_length=3,
+        max_length=64,
+        pattern=r"^[A-Z0-9-]+$",
+    )
+    expected_current_price: Decimal = Field(
+        ge=0,
+        max_digits=10,
+        decimal_places=2,
+    )
+    new_price: Decimal = Field(
+        ge=0,
+        max_digits=10,
+        decimal_places=2,
+    )
+    currency: str = Field(
+        default="USD",
+        min_length=3,
+        max_length=3,
+        pattern=r"^[A-Z]{3}$",
+    )
 
 
 class ActionProposal(BaseModel):
@@ -19,6 +45,18 @@ class ActionProposal(BaseModel):
     priority: ImprovementPriority
     source_agents: list[SourceAgent] = Field(min_length=1)
     evidence_ids: list[UUID] = Field(min_length=1)
+    price_change: PriceChangeParameters | None = None
+
+    @model_validator(mode="after")
+    def validate_action_parameters(self) -> Self:
+        is_price_change = self.action_type is ActionType.CHANGE_PRICE
+        if is_price_change and self.price_change is None:
+            raise ValueError("change_price requires structured price parameters")
+        if not is_price_change and self.price_change is not None:
+            raise ValueError(
+                "price parameters are only valid for change_price"
+            )
+        return self
 
 
 class GovernedAction(ActionProposal):

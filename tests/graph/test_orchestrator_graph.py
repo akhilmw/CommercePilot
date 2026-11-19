@@ -1,6 +1,8 @@
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
@@ -11,7 +13,11 @@ from commercepilot.models.enums import (
     ImprovementPriority,
     SourceAgent,
 )
-from commercepilot.models.orchestration import ActionProposal, CommerceStrategy
+from commercepilot.models.orchestration import (
+    ActionProposal,
+    CommerceStrategy,
+    PriceChangeParameters,
+)
 
 
 def initial_state() -> CommercePilotState:
@@ -22,6 +28,8 @@ def initial_state() -> CommercePilotState:
         strategy=None,
         approval_policy=None,
         approval_decision=None,
+        approved_action_ids=[],
+        execution_results=[],
         review_error=None,
         competitor_error=None,
         error=None,
@@ -81,13 +89,18 @@ def test_orchestrator_combines_agents_and_applies_policy(
     synthesize.assert_called_once()
 
 
+@pytest.mark.asyncio
+@patch("commercepilot.graph.orchestrator_graph.execute_approved_actions_node")
+@patch("commercepilot.graph.orchestrator_graph.persist_approved_actions_node")
 @patch("commercepilot.graph.orchestrator_graph.synthesize_strategy_node")
 @patch("commercepilot.graph.orchestrator_graph.run_competitor_agent_node")
 @patch("commercepilot.graph.orchestrator_graph.run_review_agent_node")
-def test_orchestrator_pauses_and_resumes_for_human_approval(
+async def test_orchestrator_pauses_and_resumes_for_human_approval(
     run_review: MagicMock,
     run_competitor: MagicMock,
     synthesize: MagicMock,
+    persist_actions: MagicMock,
+    execute_actions: MagicMock,
 ) -> None:
     strategy = CommerceStrategy(
         product_sku="NOVA-AUDIO-001",
@@ -104,6 +117,11 @@ def test_orchestrator_pauses_and_resumes_for_human_approval(
                 priority=ImprovementPriority.HIGH,
                 source_agents=[SourceAgent.COMPETITOR],
                 evidence_ids=[uuid4()],
+                price_change=PriceChangeParameters(
+                    sku="NOVA-AUDIO-001",
+                    expected_current_price=Decimal("129.99"),
+                    new_price=Decimal("119.99"),
+                ),
             )
         ],
         confidence=0.8,
@@ -117,10 +135,19 @@ def test_orchestrator_pauses_and_resumes_for_human_approval(
         "competitor_error": None,
     }
     synthesize.return_value = {"strategy": strategy, "error": None}
+    action_id = uuid4()
+    persist_actions.return_value = {
+        "approved_action_ids": [action_id],
+        "error": None,
+    }
+    execute_actions.return_value = {
+        "execution_results": [],
+        "error": None,
+    }
 
     graph = build_orchestrator_graph(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "approval-test"}}
-    interrupted = graph.invoke(initial_state(), config=config)
+    interrupted = await graph.ainvoke(initial_state(), config=config)
 
     assert interrupted["approval_decision"] is None
     assert len(interrupted["__interrupt__"]) == 1
@@ -128,7 +155,7 @@ def test_orchestrator_pauses_and_resumes_for_human_approval(
     assert payload["type"] == "human_approval_required"
     assert payload["actions"][0]["action_type"] == "change_price"
 
-    completed = graph.invoke(
+    completed = await graph.ainvoke(
         Command(
             resume={
                 "approved": True,
@@ -142,3 +169,5 @@ def test_orchestrator_pauses_and_resumes_for_human_approval(
     assert completed["approval_decision"] is not None
     assert completed["approval_decision"].approved is True
     assert completed["approval_decision"].reviewer == "test-user"
+    persist_actions.assert_called_once()
+    execute_actions.assert_called_once()

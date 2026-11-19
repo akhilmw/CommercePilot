@@ -5,13 +5,21 @@ from langgraph.types import interrupt
 from openai import OpenAI, OpenAIError
 
 from commercepilot.core.config import get_settings
+from commercepilot.db.models import ApprovedAction
+from commercepilot.db.session import SessionLocal
 from commercepilot.graph.competitor_graph import build_competitor_graph
 from commercepilot.graph.competitor_state import CompetitorAgentState
 from commercepilot.graph.orchestrator_state import CommercePilotState
 from commercepilot.graph.review_graph import build_review_graph
 from commercepilot.graph.review_state import ReviewAgentState
+from commercepilot.mcp.client import (
+    CommercePilotMCPClient,
+    UpdateProductPriceRequest,
+    UpdateProductPriceResult,
+)
 from commercepilot.models.orchestration import HumanApprovalDecision
 from commercepilot.services.approval_policy import apply_approval_policy
+from commercepilot.services.approved_actions import persist_approved_price_actions
 from commercepilot.services.strategy_synthesis import synthesize_strategy
 
 RUN_REVIEW_AGENT_NODE = "run_review_agent"
@@ -19,6 +27,8 @@ RUN_COMPETITOR_AGENT_NODE = "run_competitor_agent"
 SYNTHESIZE_STRATEGY_NODE = "synthesize_strategy"
 APPLY_APPROVAL_POLICY_NODE = "apply_approval_policy"
 REQUEST_HUMAN_APPROVAL_NODE = "request_human_approval"
+PERSIST_APPROVED_ACTIONS_NODE = "persist_approved_actions"
+EXECUTE_APPROVED_ACTIONS_NODE = "execute_approved_actions"
 
 
 def run_review_agent_node(state: CommercePilotState) -> dict[str, Any]:
@@ -130,6 +140,73 @@ def request_human_approval_node(
     }
 
 
+def persist_approved_actions_node(
+    state: CommercePilotState,
+) -> dict[str, Any]:
+    decision = state["approval_decision"]
+    policy = state["approval_policy"]
+    if decision is None or policy is None:
+        return {
+            "approved_action_ids": [],
+            "error": "Approval state is incomplete.",
+        }
+    if not decision.approved:
+        return {"approved_action_ids": [], "error": None}
+
+    try:
+        with SessionLocal() as session:
+            actions = persist_approved_price_actions(
+                session,
+                policy,
+                decision,
+            )
+            action_ids = [action.id for action in actions]
+    except ValueError as error:
+        return {"approved_action_ids": [], "error": str(error)}
+
+    return {"approved_action_ids": action_ids, "error": None}
+
+
+async def execute_approved_actions_node(
+    state: CommercePilotState,
+) -> dict[str, Any]:
+    if not state["approved_action_ids"]:
+        return {"execution_results": [], "error": None}
+
+    requests: list[UpdateProductPriceRequest] = []
+    with SessionLocal() as session:
+        for action_id in state["approved_action_ids"]:
+            action = session.get(ApprovedAction, action_id)
+            if action is None:
+                return {
+                    "execution_results": [],
+                    "error": f"Approved action not found: {action_id}",
+                }
+            payload = action.payload
+            requests.append(
+                UpdateProductPriceRequest(
+                    action_id=str(action.id),
+                    idempotency_key=action.idempotency_key,
+                    sku=str(payload["sku"]),
+                    expected_current_price=str(
+                        payload["expected_current_price"]
+                    ),
+                    new_price=str(payload["new_price"]),
+                )
+            )
+
+    client = CommercePilotMCPClient(get_settings().mcp_base_url)
+    results: list[UpdateProductPriceResult] = []
+    for request in requests:
+        try:
+            result = await client.update_product_price(request)
+        except RuntimeError as error:
+            return {"execution_results": results, "error": str(error)}
+        results.append(result)
+
+    return {"execution_results": results, "error": None}
+
+
 def route_after_synthesis(state: CommercePilotState) -> str:
     if state["error"] is not None:
         return END
@@ -145,6 +222,19 @@ def route_after_approval_policy(state: CommercePilotState) -> str:
     return END
 
 
+def route_after_human_decision(state: CommercePilotState) -> str:
+    decision = state["approval_decision"]
+    if state["error"] is not None or decision is None or not decision.approved:
+        return END
+    return PERSIST_APPROVED_ACTIONS_NODE
+
+
+def route_after_persisting_actions(state: CommercePilotState) -> str:
+    if state["error"] is not None:
+        return END
+    return EXECUTE_APPROVED_ACTIONS_NODE
+
+
 def build_orchestrator_graph(checkpointer: Any | None = None) -> Any:
     graph = StateGraph(CommercePilotState)
     graph.add_node(RUN_REVIEW_AGENT_NODE, run_review_agent_node)
@@ -157,6 +247,14 @@ def build_orchestrator_graph(checkpointer: Any | None = None) -> Any:
     graph.add_node(
         REQUEST_HUMAN_APPROVAL_NODE,
         request_human_approval_node,
+    )
+    graph.add_node(
+        PERSIST_APPROVED_ACTIONS_NODE,
+        persist_approved_actions_node,
+    )
+    graph.add_node(
+        EXECUTE_APPROVED_ACTIONS_NODE,
+        execute_approved_actions_node,
     )
 
     graph.add_edge(START, RUN_REVIEW_AGENT_NODE)
@@ -181,5 +279,21 @@ def build_orchestrator_graph(checkpointer: Any | None = None) -> Any:
             END: END,
         },
     )
-    graph.add_edge(REQUEST_HUMAN_APPROVAL_NODE, END)
+    graph.add_conditional_edges(
+        REQUEST_HUMAN_APPROVAL_NODE,
+        route_after_human_decision,
+        {
+            PERSIST_APPROVED_ACTIONS_NODE: PERSIST_APPROVED_ACTIONS_NODE,
+            END: END,
+        },
+    )
+    graph.add_conditional_edges(
+        PERSIST_APPROVED_ACTIONS_NODE,
+        route_after_persisting_actions,
+        {
+            EXECUTE_APPROVED_ACTIONS_NODE: EXECUTE_APPROVED_ACTIONS_NODE,
+            END: END,
+        },
+    )
+    graph.add_edge(EXECUTE_APPROVED_ACTIONS_NODE, END)
     return graph.compile(checkpointer=checkpointer)

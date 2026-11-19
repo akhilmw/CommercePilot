@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -8,7 +9,10 @@ from commercepilot.models.enums import (
     ImprovementPriority,
     SourceAgent,
 )
-from commercepilot.models.orchestration import ActionProposal
+from commercepilot.models.orchestration import (
+    ActionProposal,
+    PriceChangeParameters,
+)
 from commercepilot.services.approval_policy import (
     APPROVAL_REQUIRED_ACTIONS,
     NO_APPROVAL_REQUIRED_ACTIONS,
@@ -18,6 +22,15 @@ from commercepilot.services.approval_policy import (
 
 
 def make_proposal(action_type: ActionType) -> ActionProposal:
+    price_change = (
+        PriceChangeParameters(
+            sku="NOVA-AUDIO-001",
+            expected_current_price=Decimal("129.99"),
+            new_price=Decimal("119.99"),
+        )
+        if action_type is ActionType.CHANGE_PRICE
+        else None
+    )
     return ActionProposal(
         action_type=action_type,
         title="Respond to current market evidence",
@@ -26,6 +39,7 @@ def make_proposal(action_type: ActionType) -> ActionProposal:
         priority=ImprovementPriority.HIGH,
         source_agents=[SourceAgent.ORCHESTRATOR],
         evidence_ids=[uuid4()],
+        price_change=price_change,
     )
 
 

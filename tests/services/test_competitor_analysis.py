@@ -60,6 +60,8 @@ def make_insight(evidence: CompetitorEvidenceSet) -> CompetitorInsight:
 
     return CompetitorInsight(
         product_sku=evidence.product_sku,
+        our_price=evidence.our_price,
+        currency=evidence.currency,
         overall_threat_level=CompetitiveThreatLevel.HIGH,
         market_summary=(
             "AudioPeak created significant pricing pressure by moving below "

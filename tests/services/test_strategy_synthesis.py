@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -45,6 +46,8 @@ def make_insights() -> tuple[ReviewInsight, CompetitorInsight]:
     )
     competitor_insight = CompetitorInsight(
         product_sku="NOVA-AUDIO-001",
+        our_price=Decimal("129.99"),
+        currency="USD",
         overall_threat_level=CompetitiveThreatLevel.HIGH,
         market_summary=(
             "AudioPeak is currently cheaper and creates pricing pressure."
