@@ -12,3 +12,15 @@ class PriceChangeType(StrEnum):
     DECREASED = "decreased"
     UNCHANGED = "unchanged"
     INCREASED = "increased"
+
+
+class ReviewSentiment(StrEnum):
+    POSITIVE = "positive"
+    MIXED = "mixed"
+    NEGATIVE = "negative"
+
+
+class ImprovementPriority(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"

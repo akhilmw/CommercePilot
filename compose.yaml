@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-commercepilot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commercepilot}
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - commercepilot_postgres_data:/var/lib/postgresql/data
     healthcheck:

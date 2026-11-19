@@ -34,6 +34,7 @@ packages = ["src/commercepilot"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]

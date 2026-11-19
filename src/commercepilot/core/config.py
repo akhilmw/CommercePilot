@@ -12,11 +12,12 @@ class Settings(BaseSettings):
 
     environment: str = "local"
     database_url: str = (
-        "postgresql+psycopg://commercepilot:commercepilot@localhost:5433/"
+        "postgresql+psycopg://commercepilot:commercepilot@localhost:5432/"
         "commercepilot"
     )
     mcp_base_url: str = "http://localhost:8081"
     openai_api_key: str | None = None
+    openai_model: str = "gpt-5-mini"
 
 
 @lru_cache
