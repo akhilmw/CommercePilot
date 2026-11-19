@@ -11,7 +11,7 @@ type healthResponse struct {
 	Service string `json:"service"`
 }
 
-func New(logger *slog.Logger) http.Handler {
+func New(logger *slog.Logger, mcpHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -22,6 +22,7 @@ func New(logger *slog.Logger) http.Handler {
 			logger.Error("failed to encode health response", "error", err)
 		}
 	})
+	mux.Handle("/mcp", mcpHandler)
 
 	return mux
 }
