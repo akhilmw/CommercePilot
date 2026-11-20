@@ -6,6 +6,7 @@ import pytest
 from commercepilot.mcp.client import (
     CommercePilotMCPClient,
     MCPToolExecutionError,
+    PublishCatalogUpdateRequest,
     UpdateProductPriceRequest,
 )
 
@@ -17,6 +18,16 @@ def make_request() -> UpdateProductPriceRequest:
         sku="NOVA-AUDIO-001",
         expected_current_price="129.99",
         new_price="119.99",
+    )
+
+
+def make_catalog_request() -> PublishCatalogUpdateRequest:
+    return PublishCatalogUpdateRequest(
+        action_id="bca633e6-3a85-492b-ac2e-f731b8fac20d",
+        idempotency_key="catalog-publish:bca633e6",
+        draft_id="bca633e6-3a85-492b-ac2e-f731b8fac20d",
+        sku="NOVA-AUDIO-001",
+        expected_catalog_version=1,
     )
 
 
@@ -73,3 +84,60 @@ async def test_update_product_price_raises_structured_tool_error(
         await CommercePilotMCPClient(
             "http://localhost:8081"
         ).update_product_price(make_request())
+
+
+@pytest.mark.asyncio
+@patch("commercepilot.mcp.client.Client")
+async def test_publish_catalog_update_returns_structured_result(
+    client_factory: AsyncMock,
+) -> None:
+    session = client_factory.return_value.__aenter__.return_value
+    session.call_tool.return_value = SimpleNamespace(
+        structured_content={
+            "status": "executed",
+            "action_id": make_catalog_request().action_id,
+            "draft_id": make_catalog_request().draft_id,
+            "sku": "NOVA-AUDIO-001",
+            "previous_catalog_version": 1,
+            "current_catalog_version": 2,
+            "published_at": "2026-11-19T23:00:00Z",
+            "replayed": False,
+        },
+        is_error=False,
+    )
+
+    result = await CommercePilotMCPClient(
+        "http://localhost:8081"
+    ).publish_catalog_update(make_catalog_request())
+
+    assert result.status == "executed"
+    assert result.current_catalog_version == 2
+    session.call_tool.assert_awaited_once_with(
+        "publish_catalog_update",
+        arguments=make_catalog_request().model_dump(mode="json"),
+    )
+
+
+@pytest.mark.asyncio
+@patch("commercepilot.mcp.client.Client")
+async def test_publish_catalog_update_raises_structured_tool_error(
+    client_factory: AsyncMock,
+) -> None:
+    session = client_factory.return_value.__aenter__.return_value
+    session.call_tool.return_value = SimpleNamespace(
+        structured_content={
+            "status": "rejected",
+            "action_id": make_catalog_request().action_id,
+            "draft_id": make_catalog_request().draft_id,
+            "sku": "NOVA-AUDIO-001",
+            "replayed": False,
+            "error_code": "stale_catalog",
+            "message": "product catalog changed after approval",
+        },
+        is_error=True,
+    )
+
+    with pytest.raises(MCPToolExecutionError, match="stale_catalog"):
+        await CommercePilotMCPClient(
+            "http://localhost:8081"
+        ).publish_catalog_update(make_catalog_request())

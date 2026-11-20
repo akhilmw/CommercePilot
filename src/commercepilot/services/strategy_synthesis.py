@@ -26,6 +26,8 @@ publish_catalog_update or launch_campaign until those tools exist. A change_pric
 proposal must include exact structured price_change parameters.
 """.strip()
 
+MAX_STRATEGY_SYNTHESIS_ATTEMPTS = 2
+
 
 def _review_evidence_ids(insight: ReviewInsight) -> set[UUID]:
     evidence_ids: set[UUID] = set()
@@ -98,8 +100,7 @@ def validate_strategy_evidence(
             and SourceAgent.COMPETITOR not in action.source_agents
         ):
             raise ValueError(
-                "Action cites competitor evidence without naming the "
-                "Competitor Agent."
+                "Action cites competitor evidence without naming the Competitor Agent."
             )
 
 
@@ -109,24 +110,65 @@ def synthesize_strategy(
     client: OpenAI,
     model: str,
 ) -> CommerceStrategy:
-    response = client.responses.parse(
-        model=model,
-        instructions=STRATEGY_SYNTHESIS_INSTRUCTIONS,
-        input=json.dumps(
-            {
+    valid_review_ids = sorted(
+        str(value) for value in _review_evidence_ids(review_insight)
+    )
+    valid_competitor_ids = sorted(
+        str(value) for value in _competitor_evidence_ids(competitor_insight)
+    )
+    request: dict[str, object] = {
+        "review_insight": review_insight.model_dump(mode="json"),
+        "competitor_insight": competitor_insight.model_dump(mode="json"),
+        "valid_evidence_ids_by_agent": {
+            SourceAgent.REVIEW.value: valid_review_ids,
+            SourceAgent.COMPETITOR.value: valid_competitor_ids,
+        },
+    }
+    last_error: ValueError | None = None
+
+    for attempt in range(MAX_STRATEGY_SYNTHESIS_ATTEMPTS):
+        response = client.responses.parse(
+            model=model,
+            instructions=STRATEGY_SYNTHESIS_INSTRUCTIONS,
+            input=json.dumps(request),
+            text_format=CommerceStrategy,
+        )
+        strategy = response.output_parsed
+        if strategy is None:
+            last_error = ValueError(
+                "The model returned no structured commerce strategy."
+            )
+        else:
+            try:
+                validate_strategy_evidence(
+                    strategy,
+                    review_insight,
+                    competitor_insight,
+                )
+            except ValueError as error:
+                last_error = error
+            else:
+                return strategy
+
+        if attempt + 1 < MAX_STRATEGY_SYNTHESIS_ATTEMPTS:
+            request = {
                 "review_insight": review_insight.model_dump(mode="json"),
                 "competitor_insight": competitor_insight.model_dump(mode="json"),
+                "valid_evidence_ids_by_agent": {
+                    SourceAgent.REVIEW.value: valid_review_ids,
+                    SourceAgent.COMPETITOR.value: valid_competitor_ids,
+                },
+                "previous_invalid_strategy": (
+                    strategy.model_dump(mode="json") if strategy is not None else None
+                ),
+                "validation_error": str(last_error),
+                "correction_required": (
+                    "Regenerate the complete strategy. Copy evidence UUIDs "
+                    "exactly from valid_evidence_ids_by_agent and keep each "
+                    "source agent aligned with its cited IDs."
+                ),
             }
-        ),
-        text_format=CommerceStrategy,
-    )
-    strategy = response.output_parsed
-    if strategy is None:
-        raise ValueError("The model returned no structured commerce strategy.")
 
-    validate_strategy_evidence(
-        strategy,
-        review_insight,
-        competitor_insight,
-    )
-    return strategy
+    if last_error is None:
+        raise ValueError("Strategy synthesis failed without a validation error.")
+    raise last_error

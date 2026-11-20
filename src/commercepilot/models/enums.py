@@ -7,6 +7,13 @@ class ProductStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class CatalogDraftStatus(StrEnum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    PUBLISHED = "published"
+    REJECTED = "rejected"
+
+
 class PriceChangeType(StrEnum):
     INITIAL = "initial"
     DECREASED = "decreased"

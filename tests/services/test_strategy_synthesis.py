@@ -1,4 +1,6 @@
+import json
 from decimal import Decimal
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -20,6 +22,7 @@ from commercepilot.models.orchestration import (
 )
 from commercepilot.models.review import ReviewInsight, ReviewTheme
 from commercepilot.services.strategy_synthesis import (
+    synthesize_strategy,
     validate_strategy_evidence,
 )
 
@@ -49,9 +52,7 @@ def make_insights() -> tuple[ReviewInsight, CompetitorInsight]:
         our_price=Decimal("129.99"),
         currency="USD",
         overall_threat_level=CompetitiveThreatLevel.HIGH,
-        market_summary=(
-            "AudioPeak is currently cheaper and creates pricing pressure."
-        ),
+        market_summary=("AudioPeak is currently cheaper and creates pricing pressure."),
         findings=[
             CompetitorFinding(
                 competitor_product_id=uuid4(),
@@ -90,8 +91,7 @@ def make_strategy(
                     "Create campaign copy emphasizing sound quality and value."
                 ),
                 rationale=(
-                    "Review and competitor evidence support differentiated "
-                    "positioning."
+                    "Review and competitor evidence support differentiated positioning."
                 ),
                 priority=ImprovementPriority.HIGH,
                 source_agents=[
@@ -140,3 +140,52 @@ def test_validate_strategy_rejects_unknown_evidence() -> None:
             review_insight,
             competitor_insight,
         )
+
+
+def test_synthesize_strategy_retries_an_invented_evidence_id() -> None:
+    review_insight, competitor_insight = make_insights()
+    invalid_strategy = make_strategy(review_insight, competitor_insight)
+    invalid_strategy.action_proposals[0].evidence_ids = [uuid4()]
+    corrected_strategy = make_strategy(review_insight, competitor_insight)
+    client = MagicMock()
+    client.responses.parse.side_effect = [
+        MagicMock(output_parsed=invalid_strategy),
+        MagicMock(output_parsed=corrected_strategy),
+    ]
+
+    result = synthesize_strategy(
+        review_insight,
+        competitor_insight,
+        client,
+        "test-model",
+    )
+
+    assert result is corrected_strategy
+    assert client.responses.parse.call_count == 2
+    retry_request = json.loads(client.responses.parse.call_args_list[1].kwargs["input"])
+    valid_ids = retry_request["valid_evidence_ids_by_agent"]
+    assert valid_ids["review_agent"] == [
+        str(review_insight.strengths[0].evidence_review_ids[0])
+    ]
+    assert valid_ids["competitor_agent"] == [
+        str(competitor_insight.findings[0].evidence_snapshot_ids[0])
+    ]
+    assert "unknown evidence IDs" in retry_request["validation_error"]
+
+
+def test_synthesize_strategy_stops_after_bounded_retries() -> None:
+    review_insight, competitor_insight = make_insights()
+    invalid_strategy = make_strategy(review_insight, competitor_insight)
+    invalid_strategy.action_proposals[0].evidence_ids = [uuid4()]
+    client = MagicMock()
+    client.responses.parse.return_value.output_parsed = invalid_strategy
+
+    with pytest.raises(ValueError, match="unknown evidence IDs"):
+        synthesize_strategy(
+            review_insight,
+            competitor_insight,
+            client,
+            "test-model",
+        )
+
+    assert client.responses.parse.call_count == 2

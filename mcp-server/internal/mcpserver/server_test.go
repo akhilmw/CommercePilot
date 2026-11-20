@@ -19,10 +19,17 @@ func (fakePriceUpdater) ExecutePriceUpdate(
 	return tools.UpdateProductPriceOutput{}, nil
 }
 
+func (fakePriceUpdater) ExecuteCatalogPublish(
+	_ context.Context,
+	_ tools.PublishCatalogUpdateInput,
+) (tools.PublishCatalogUpdateOutput, error) {
+	return tools.PublishCatalogUpdateOutput{}, nil
+}
+
 func TestStreamableHTTPExposesUpdateProductPrice(t *testing.T) {
 	t.Parallel()
 
-	server := New(fakePriceUpdater{})
+	server := New(fakePriceUpdater{}, fakePriceUpdater{})
 	httpServer := httptest.NewServer(HTTPHandler(server))
 	defer httpServer.Close()
 
@@ -44,16 +51,24 @@ func TestStreamableHTTPExposesUpdateProductPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools over streamable HTTP: %v", err)
 	}
-	if len(result.Tools) != 1 || result.Tools[0].Name != "update_product_price" {
+	if len(result.Tools) != 2 {
+		t.Fatalf("expected two tools, got %#v", result.Tools)
+	}
+	toolNames := map[string]bool{}
+	for _, tool := range result.Tools {
+		toolNames[tool.Name] = true
+	}
+	if !toolNames["update_product_price"] ||
+		!toolNames["publish_catalog_update"] {
 		t.Fatalf("unexpected tools result: %#v", result.Tools)
 	}
 }
 
-func TestServerExposesOnlyUpdateProductPrice(t *testing.T) {
+func TestServerExposesCommerceTools(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	server := New(fakePriceUpdater{})
+	server := New(fakePriceUpdater{}, fakePriceUpdater{})
 	client := mcp.NewClient(
 		&mcp.Implementation{Name: "commercepilot-test", Version: "0.1.0"},
 		nil,
@@ -76,10 +91,15 @@ func TestServerExposesOnlyUpdateProductPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if len(result.Tools) != 1 {
-		t.Fatalf("expected one tool, got %d", len(result.Tools))
+	if len(result.Tools) != 2 {
+		t.Fatalf("expected two tools, got %d", len(result.Tools))
 	}
-	if result.Tools[0].Name != "update_product_price" {
-		t.Fatalf("unexpected tool: %q", result.Tools[0].Name)
+	toolNames := map[string]bool{}
+	for _, tool := range result.Tools {
+		toolNames[tool.Name] = true
+	}
+	if !toolNames["update_product_price"] ||
+		!toolNames["publish_catalog_update"] {
+		t.Fatalf("unexpected tools: %#v", result.Tools)
 	}
 }

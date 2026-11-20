@@ -8,7 +8,10 @@ import (
 	"github.com/akhilmw/commercepilot/mcp-server/internal/tools"
 )
 
-func New(priceUpdater tools.PriceUpdater) *mcp.Server {
+func New(
+	priceUpdater tools.PriceUpdater,
+	catalogPublisher tools.CatalogPublisher,
+) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "commercepilot-mcp",
@@ -26,6 +29,17 @@ func New(priceUpdater tools.PriceUpdater) *mcp.Server {
 				"Rejects missing approvals, altered payloads, and stale prices.",
 		},
 		priceTool.Handle,
+	)
+
+	catalogTool := tools.NewPublishCatalogUpdateTool(catalogPublisher)
+	mcp.AddTool(
+		server,
+		&mcp.Tool{
+			Name: "publish_catalog_update",
+			Description: "Publish one exact, human-approved catalog draft. " +
+				"Rejects altered approvals, missing drafts, and stale catalog versions.",
+		},
+		catalogTool.Handle,
 	)
 	return server
 }

@@ -1,4 +1,8 @@
-from scripts.run_orchestrator import format_approval_action
+from scripts.run_orchestrator import (
+    format_approval_action,
+    format_catalog_comparison,
+    parse_args,
+)
 
 
 def test_format_price_change_for_human_approval() -> None:
@@ -24,3 +28,42 @@ def test_format_price_change_for_human_approval() -> None:
         "  Change: USD -20.00 (-15.39%)",
         "  Reason: A competitor is running a limited-time promotion.",
     ]
+
+
+def test_format_catalog_comparison_shows_only_changed_fields() -> None:
+    lines = format_catalog_comparison(
+        {
+            "current_catalog_version": 1,
+            "expected_catalog_version": 1,
+            "fields": [
+                {
+                    "label": "SEO title",
+                    "current_value": "NovaSound Pro",
+                    "proposed_value": "NovaSound Pro Wireless ANC Headphones",
+                    "changed": True,
+                },
+                {
+                    "label": "Product description",
+                    "current_value": "Unchanged description",
+                    "proposed_value": "Unchanged description",
+                    "changed": False,
+                },
+            ],
+        }
+    )
+
+    assert lines == [
+        "Catalog version: 1 (draft expects 1)",
+        "\nSEO title:",
+        '- "NovaSound Pro"',
+        '+ "NovaSound Pro Wireless ANC Headphones"',
+    ]
+
+
+def test_parse_args_enables_forced_catalog_path(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        ["run_orchestrator.py", "--force-catalog"],
+    )
+
+    assert parse_args().force_catalog is True

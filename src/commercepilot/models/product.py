@@ -64,5 +64,11 @@ class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    catalog_version: int = Field(ge=1)
+    seo_title: str | None = Field(default=None, max_length=70)
+    meta_description: str | None = Field(default=None, max_length=160)
+    feature_bullets: list[dict[str, Any]] = Field(default_factory=list)
+    seo_keywords: list[str] = Field(default_factory=list)
+    target_audience: str | None = Field(default=None, max_length=300)
     created_at: datetime
     updated_at: datetime

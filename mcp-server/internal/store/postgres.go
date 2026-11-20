@@ -32,6 +32,19 @@ type priceChangePayload struct {
 	NewPrice             string `json:"new_price"`
 }
 
+type catalogPublishPayload struct {
+	DraftID                string          `json:"draft_id"`
+	ProductID              string          `json:"product_id"`
+	ProductSKU             string          `json:"product_sku"`
+	ExpectedCatalogVersion int             `json:"expected_catalog_version"`
+	SEOTitle               string          `json:"seo_title"`
+	MetaDescription        string          `json:"meta_description"`
+	ProductDescription     string          `json:"product_description"`
+	FeatureBullets         json.RawMessage `json:"feature_bullets"`
+	SEOKeywords            json.RawMessage `json:"seo_keywords"`
+	TargetAudience         string          `json:"target_audience"`
+}
+
 func New(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
@@ -133,6 +146,188 @@ func (repository *Repository) ExecutePriceUpdate(
 	return output, nil
 }
 
+func (repository *Repository) ExecuteCatalogPublish(
+	ctx context.Context,
+	input tools.PublishCatalogUpdateInput,
+) (tools.PublishCatalogUpdateOutput, error) {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"begin transaction: %w",
+			err,
+		)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	action, err := loadApprovedAction(ctx, tx, input.ActionID)
+	if err != nil {
+		return tools.PublishCatalogUpdateOutput{}, err
+	}
+	if action.actionType != "publish_catalog_update" ||
+		action.idempotencyKey != input.IdempotencyKey {
+		return tools.PublishCatalogUpdateOutput{}, tools.ErrApprovalMismatch
+	}
+
+	if action.status == "executed" {
+		var previous tools.PublishCatalogUpdateOutput
+		if len(action.result) == 0 {
+			return tools.PublishCatalogUpdateOutput{}, errors.New(
+				"executed action has no stored result",
+			)
+		}
+		if err := json.Unmarshal(action.result, &previous); err != nil {
+			return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+				"decode stored result: %w",
+				err,
+			)
+		}
+		previous.Replayed = true
+		return previous, nil
+	}
+	if action.status != "approved" {
+		return tools.PublishCatalogUpdateOutput{}, tools.ErrApprovalMismatch
+	}
+
+	var approvedPayload catalogPublishPayload
+	if err := json.Unmarshal(action.payload, &approvedPayload); err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"decode approved payload: %w",
+			err,
+		)
+	}
+	if !catalogPayloadMatches(approvedPayload, input) {
+		return tools.PublishCatalogUpdateOutput{}, tools.ErrApprovalMismatch
+	}
+	if !json.Valid(approvedPayload.FeatureBullets) ||
+		!json.Valid(approvedPayload.SEOKeywords) {
+		return tools.PublishCatalogUpdateOutput{}, tools.ErrInvalidInput
+	}
+
+	var draftProductID string
+	var draftExpectedVersion int
+	var draftStatus string
+	err = tx.QueryRow(
+		ctx,
+		`SELECT product_id::text, expected_catalog_version, status
+		 FROM catalog_drafts
+		 WHERE id = $1
+		 FOR UPDATE`,
+		input.DraftID,
+	).Scan(
+		&draftProductID,
+		&draftExpectedVersion,
+		&draftStatus,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tools.PublishCatalogUpdateOutput{}, tools.ErrCatalogDraftNotFound
+	}
+	if err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"load catalog draft: %w",
+			err,
+		)
+	}
+	if draftProductID != approvedPayload.ProductID ||
+		draftExpectedVersion != input.ExpectedCatalogVersion ||
+		draftStatus != "approved" {
+		return tools.PublishCatalogUpdateOutput{}, tools.ErrApprovalMismatch
+	}
+
+	var currentVersion int
+	var publishedAt time.Time
+	err = tx.QueryRow(
+		ctx,
+		`UPDATE products
+		 SET seo_title = $1,
+		     meta_description = $2,
+		     description = $3,
+		     feature_bullets = $4::jsonb,
+		     seo_keywords = $5::jsonb,
+		     target_audience = $6,
+		     catalog_version = catalog_version + 1,
+		     updated_at = now()
+		 WHERE id = $7
+		   AND sku = $8
+		   AND catalog_version = $9
+		 RETURNING catalog_version, updated_at`,
+		approvedPayload.SEOTitle,
+		approvedPayload.MetaDescription,
+		approvedPayload.ProductDescription,
+		approvedPayload.FeatureBullets,
+		approvedPayload.SEOKeywords,
+		approvedPayload.TargetAudience,
+		approvedPayload.ProductID,
+		input.SKU,
+		input.ExpectedCatalogVersion,
+	).Scan(&currentVersion, &publishedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tools.PublishCatalogUpdateOutput{}, tools.ErrStaleCatalog
+	}
+	if err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"publish product catalog: %w",
+			err,
+		)
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`UPDATE catalog_drafts
+		 SET status = 'published', published_at = $2, updated_at = $2
+		 WHERE id = $1`,
+		input.DraftID,
+		publishedAt,
+	)
+	if err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"mark catalog draft published: %w",
+			err,
+		)
+	}
+
+	output := tools.PublishCatalogUpdateOutput{
+		Status:                 "executed",
+		ActionID:               input.ActionID,
+		DraftID:                input.DraftID,
+		SKU:                    input.SKU,
+		PreviousCatalogVersion: input.ExpectedCatalogVersion,
+		CurrentCatalogVersion:  currentVersion,
+		PublishedAt:            publishedAt.UTC().Format(time.RFC3339),
+		Replayed:               false,
+	}
+	resultJSON, err := json.Marshal(output)
+	if err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"encode execution result: %w",
+			err,
+		)
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`UPDATE approved_actions
+		 SET status = 'executed', executed_at = $2, result = $3::jsonb
+		 WHERE id = $1`,
+		input.ActionID,
+		publishedAt,
+		resultJSON,
+	)
+	if err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"record execution result: %w",
+			err,
+		)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return tools.PublishCatalogUpdateOutput{}, fmt.Errorf(
+			"commit transaction: %w",
+			err,
+		)
+	}
+	return output, nil
+}
+
 func loadApprovedAction(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -188,6 +383,15 @@ func payloadMatches(
 	return payload.SKU == input.SKU &&
 		approvedExpected.Equal(inputExpected) &&
 		approvedNew.Equal(inputNew)
+}
+
+func catalogPayloadMatches(
+	payload catalogPublishPayload,
+	input tools.PublishCatalogUpdateInput,
+) bool {
+	return payload.DraftID == input.DraftID &&
+		payload.ProductSKU == input.SKU &&
+		payload.ExpectedCatalogVersion == input.ExpectedCatalogVersion
 }
 
 func normalizedPrice(value string) string {

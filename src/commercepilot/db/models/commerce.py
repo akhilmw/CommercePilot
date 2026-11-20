@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     SmallInteger,
     String,
@@ -25,11 +26,26 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from commercepilot.db.base import Base
 from commercepilot.models.enums import ProductStatus
 
+if TYPE_CHECKING:
+    from commercepilot.db.models.catalog import CatalogDraftRecord
+
 
 class Product(Base):
     __tablename__ = "products"
     __table_args__ = (
         CheckConstraint("price >= 0", name="ck_products_price_non_negative"),
+        CheckConstraint(
+            "catalog_version >= 1",
+            name="ck_products_catalog_version",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(feature_bullets) = 'array'",
+            name="ck_products_feature_bullets_array",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(seo_keywords) = 'array'",
+            name="ck_products_seo_keywords_array",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -72,6 +88,24 @@ class Product(Base):
         server_default=ProductStatus.ACTIVE.value,
         index=True,
     )
+    catalog_version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default="1",
+    )
+    seo_title: Mapped[str | None] = mapped_column(String(70))
+    meta_description: Mapped[str | None] = mapped_column(String(160))
+    feature_bullets: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
+    seo_keywords: Mapped[list[str]] = mapped_column(
+        JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
+    target_audience: Mapped[str | None] = mapped_column(String(300))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -88,6 +122,11 @@ class Product(Base):
         passive_deletes=True,
     )
     competitor_products: Mapped[list[CompetitorProduct]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    catalog_drafts: Mapped[list[CatalogDraftRecord]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
         passive_deletes=True,

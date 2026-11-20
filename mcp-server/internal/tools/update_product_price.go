@@ -94,6 +94,10 @@ func classifyError(err error) string {
 		return "approval_mismatch"
 	case errors.Is(err, ErrStalePrice):
 		return "stale_price"
+	case errors.Is(err, ErrCatalogDraftNotFound):
+		return "catalog_draft_not_found"
+	case errors.Is(err, ErrStaleCatalog):
+		return "stale_catalog"
 	default:
 		return "execution_failed"
 	}

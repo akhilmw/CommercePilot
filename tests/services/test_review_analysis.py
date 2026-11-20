@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -88,6 +89,39 @@ def test_validate_review_insight_rejects_unknown_citation() -> None:
 
     with pytest.raises(ValueError, match="unknown review IDs"):
         validate_review_insight_evidence(insight, evidence)
+
+
+def test_analyze_review_evidence_retries_an_invented_review_id() -> None:
+    evidence = make_evidence()
+    invalid_insight = make_insight(evidence)
+    invalid_insight.strengths[0].evidence_review_ids = [uuid4()]
+    corrected_insight = make_insight(evidence)
+    client = MagicMock()
+    client.responses.parse.side_effect = [
+        MagicMock(output_parsed=invalid_insight),
+        MagicMock(output_parsed=corrected_insight),
+    ]
+
+    result = analyze_review_evidence(evidence, client, "test-model")
+
+    assert result is corrected_insight
+    assert client.responses.parse.call_count == 2
+    retry_request = json.loads(client.responses.parse.call_args_list[1].kwargs["input"])
+    assert retry_request["valid_review_ids"] == [str(evidence.reviews[0].id)]
+    assert "unknown review IDs" in retry_request["validation_error"]
+
+
+def test_analyze_review_evidence_stops_after_bounded_retries() -> None:
+    evidence = make_evidence()
+    invalid_insight = make_insight(evidence)
+    invalid_insight.strengths[0].evidence_review_ids = [uuid4()]
+    client = MagicMock()
+    client.responses.parse.return_value.output_parsed = invalid_insight
+
+    with pytest.raises(ValueError, match="unknown review IDs"):
+        analyze_review_evidence(evidence, client, "test-model")
+
+    assert client.responses.parse.call_count == 2
 
 
 def test_analyze_review_evidence_rejects_empty_evidence() -> None:

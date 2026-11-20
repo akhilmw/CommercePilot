@@ -34,7 +34,7 @@ func main() {
 	}
 
 	repository := store.New(pool)
-	mcpServer := mcpserver.New(repository)
+	mcpServer := mcpserver.New(repository, repository)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

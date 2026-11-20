@@ -22,8 +22,32 @@ class UpdateProductPriceResult(BaseModel):
     message: str | None = None
 
 
+class PublishCatalogUpdateRequest(BaseModel):
+    action_id: str
+    idempotency_key: str
+    draft_id: str
+    sku: str
+    expected_catalog_version: int
+
+
+class PublishCatalogUpdateResult(BaseModel):
+    status: str
+    action_id: str
+    draft_id: str
+    sku: str
+    previous_catalog_version: int | None = None
+    current_catalog_version: int | None = None
+    published_at: str | None = None
+    replayed: bool
+    error_code: str | None = None
+    message: str | None = None
+
+
 class MCPToolExecutionError(RuntimeError):
-    def __init__(self, result: UpdateProductPriceResult) -> None:
+    def __init__(
+        self,
+        result: UpdateProductPriceResult | PublishCatalogUpdateResult,
+    ) -> None:
         self.result = result
         super().__init__(f"{result.error_code}: {result.message}")
 
@@ -46,6 +70,26 @@ class CommercePilotMCPClient:
             raise RuntimeError("MCP tool returned no structured content.")
 
         result = UpdateProductPriceResult.model_validate(
+            response.structured_content
+        )
+        if response.is_error:
+            raise MCPToolExecutionError(result)
+        return result
+
+    async def publish_catalog_update(
+        self,
+        request: PublishCatalogUpdateRequest,
+    ) -> PublishCatalogUpdateResult:
+        async with Client(self.endpoint) as client:
+            response = await client.call_tool(
+                "publish_catalog_update",
+                arguments=request.model_dump(mode="json"),
+            )
+
+        if response.structured_content is None:
+            raise RuntimeError("MCP tool returned no structured content.")
+
+        result = PublishCatalogUpdateResult.model_validate(
             response.structured_content
         )
         if response.is_error:
