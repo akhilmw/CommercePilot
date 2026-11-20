@@ -70,6 +70,33 @@ def format_catalog_comparison(comparison: dict[str, Any]) -> list[str]:
     return lines
 
 
+def format_campaign_preview(preview: dict[str, Any]) -> list[str]:
+    lines = [
+        f"Campaign: {preview['name']}",
+        f"Objective: {preview['objective']}",
+        f"Audience: {preview['target_audience']}",
+        f"Core message: {preview['core_message']}",
+        f"Duration: {preview['duration_days']} days",
+        (
+            "Evidence snapshot: catalog version "
+            f"{preview['source_catalog_version']}, "
+            f"price {Decimal(preview['source_price']):.2f}"
+        ),
+        "\nProposed campaign assets:",
+    ]
+    for asset in preview["assets"]:
+        lines.extend(
+            [
+                f"\n[{asset['channel'].upper()}]",
+                f"Headline: {asset['headline']}",
+                f"Body: {asset['body']}",
+                f"CTA: {asset['call_to_action']}",
+            ]
+        )
+    lines.append("\nSuccess metrics: " + ", ".join(preview["success_metrics"]))
+    return lines
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the CommercePilot orchestration workflow."
@@ -82,16 +109,29 @@ def parse_args() -> argparse.Namespace:
             "path even when strategy synthesis does not propose it."
         ),
     )
+    parser.add_argument(
+        "--force-campaign",
+        action="store_true",
+        help=(
+            "Run the campaign draft, verification, approval, and MCP launch "
+            "path even when strategy synthesis does not propose it."
+        ),
+    )
     return parser.parse_args()
 
 
-async def main(*, force_catalog: bool = False) -> None:
+async def main(
+    *,
+    force_catalog: bool = False,
+    force_campaign: bool = False,
+) -> None:
     graph = build_orchestrator_graph(checkpointer=build_orchestrator_checkpointer())
     config = {"configurable": {"thread_id": str(uuid4())}}
     result = await graph.ainvoke(
         CommercePilotState(
             product_sku="NOVA-AUDIO-001",
             force_catalog_update=force_catalog,
+            force_campaign_update=force_campaign,
             review_insight=None,
             competitor_insight=None,
             strategy=None,
@@ -101,6 +141,13 @@ async def main(*, force_catalog: bool = False) -> None:
             catalog_approval_decision=None,
             catalog_publish_action_id=None,
             catalog_execution_result=None,
+            campaign_evidence=None,
+            campaign_draft=None,
+            campaign_draft_id=None,
+            campaign_preview=None,
+            campaign_approval_decision=None,
+            campaign_launch_action_id=None,
+            campaign_execution_result=None,
             approval_policy=None,
             approval_decision=None,
             approved_action_ids=[],
@@ -108,6 +155,7 @@ async def main(*, force_catalog: bool = False) -> None:
             review_error=None,
             competitor_error=None,
             catalog_error=None,
+            campaign_error=None,
             error=None,
         ),
         config=config,
@@ -125,6 +173,12 @@ async def main(*, force_catalog: bool = False) -> None:
             for line in format_catalog_comparison(payload["comparison"]):
                 print(line)
             prompt = "\nApprove this catalog draft for publishing? [y/N]: "
+        elif payload["type"] == "campaign_launch_approval_required":
+            print(f"Campaign draft: {payload['draft_id']}")
+            print("\nCampaign launch preview:")
+            for line in format_campaign_preview(payload["preview"]):
+                print(line)
+            prompt = "\nApprove this campaign for launch? [y/N]: "
         elif payload["type"] == "human_approval_required":
             print("\nPending actions:")
             for action in payload["actions"]:
@@ -183,6 +237,23 @@ async def main(*, force_catalog: bool = False) -> None:
                     f"({catalog_execution.status})"
                 )
 
+    campaign_draft = result["campaign_draft"]
+    if campaign_draft is not None:
+        print("\nCampaign Agent draft:")
+        print(campaign_draft.model_dump_json(indent=2))
+        print(f"\nSaved campaign draft ID: {result['campaign_draft_id']}")
+        campaign_decision = result["campaign_approval_decision"]
+        if campaign_decision is not None:
+            print(f"Campaign launch approved: {campaign_decision.approved}")
+            print(f"Campaign launch action ID: {result['campaign_launch_action_id']}")
+            campaign_execution = result["campaign_execution_result"]
+            if campaign_execution is not None:
+                print(
+                    "Campaign launch: "
+                    f"{campaign_execution.status} at "
+                    f"{campaign_execution.launched_at}"
+                )
+
     print(f"\nAdditional strategy approval required: {policy.requires_human_approval}")
     decision = result["approval_decision"]
     if decision is not None:
@@ -200,4 +271,9 @@ async def main(*, force_catalog: bool = False) -> None:
 
 if __name__ == "__main__":
     arguments = parse_args()
-    asyncio.run(main(force_catalog=arguments.force_catalog))
+    asyncio.run(
+        main(
+            force_catalog=arguments.force_catalog,
+            force_campaign=arguments.force_campaign,
+        )
+    )

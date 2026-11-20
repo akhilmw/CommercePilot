@@ -45,6 +45,17 @@ type catalogPublishPayload struct {
 	TargetAudience         string          `json:"target_audience"`
 }
 
+type campaignLaunchPayload struct {
+	DraftID              string          `json:"draft_id"`
+	ProductID            string          `json:"product_id"`
+	ProductSKU           string          `json:"product_sku"`
+	SourceCatalogVersion int             `json:"source_catalog_version"`
+	SourcePrice          string          `json:"source_price"`
+	Assets               json.RawMessage `json:"assets"`
+	SuccessMetrics       json.RawMessage `json:"success_metrics"`
+	SupportingEvidence   json.RawMessage `json:"supporting_evidence_ids"`
+}
+
 func New(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
@@ -328,6 +339,153 @@ func (repository *Repository) ExecuteCatalogPublish(
 	return output, nil
 }
 
+func (repository *Repository) ExecuteCampaignLaunch(
+	ctx context.Context,
+	input tools.LaunchCampaignInput,
+) (tools.LaunchCampaignOutput, error) {
+	inputPrice, err := decimal.NewFromString(input.SourcePrice)
+	if err != nil || inputPrice.IsNegative() {
+		return tools.LaunchCampaignOutput{}, tools.ErrInvalidInput
+	}
+
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	action, err := loadApprovedAction(ctx, tx, input.ActionID)
+	if err != nil {
+		return tools.LaunchCampaignOutput{}, err
+	}
+	if action.actionType != "launch_campaign" ||
+		action.idempotencyKey != input.IdempotencyKey {
+		return tools.LaunchCampaignOutput{}, tools.ErrApprovalMismatch
+	}
+	if action.status == "executed" {
+		var previous tools.LaunchCampaignOutput
+		if len(action.result) == 0 {
+			return tools.LaunchCampaignOutput{}, errors.New("executed action has no stored result")
+		}
+		if err := json.Unmarshal(action.result, &previous); err != nil {
+			return tools.LaunchCampaignOutput{}, fmt.Errorf("decode stored result: %w", err)
+		}
+		previous.Replayed = true
+		return previous, nil
+	}
+	if action.status != "approved" {
+		return tools.LaunchCampaignOutput{}, tools.ErrApprovalMismatch
+	}
+
+	var approvedPayload campaignLaunchPayload
+	if err := json.Unmarshal(action.payload, &approvedPayload); err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("decode approved payload: %w", err)
+	}
+	if !campaignPayloadMatches(approvedPayload, input) {
+		return tools.LaunchCampaignOutput{}, tools.ErrApprovalMismatch
+	}
+	if !json.Valid(approvedPayload.Assets) ||
+		!json.Valid(approvedPayload.SuccessMetrics) ||
+		!json.Valid(approvedPayload.SupportingEvidence) {
+		return tools.LaunchCampaignOutput{}, tools.ErrInvalidInput
+	}
+
+	var draftProductID string
+	var draftCatalogVersion int
+	var draftPrice string
+	var draftStatus string
+	err = tx.QueryRow(
+		ctx,
+		`SELECT product_id::text, source_catalog_version, source_price::text, status
+		 FROM campaign_drafts
+		 WHERE id = $1
+		 FOR UPDATE`,
+		input.DraftID,
+	).Scan(&draftProductID, &draftCatalogVersion, &draftPrice, &draftStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tools.LaunchCampaignOutput{}, tools.ErrCampaignDraftNotFound
+	}
+	if err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("load campaign draft: %w", err)
+	}
+	draftPriceValue, err := decimal.NewFromString(draftPrice)
+	if err != nil ||
+		draftProductID != approvedPayload.ProductID ||
+		draftCatalogVersion != input.SourceCatalogVersion ||
+		!draftPriceValue.Equal(inputPrice) ||
+		draftStatus != "approved" {
+		return tools.LaunchCampaignOutput{}, tools.ErrApprovalMismatch
+	}
+
+	var currentCatalogVersion int
+	var currentPrice string
+	err = tx.QueryRow(
+		ctx,
+		`SELECT catalog_version, price::text
+		 FROM products
+		 WHERE id = $1 AND sku = $2
+		 FOR UPDATE`,
+		approvedPayload.ProductID,
+		input.SKU,
+	).Scan(&currentCatalogVersion, &currentPrice)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tools.LaunchCampaignOutput{}, tools.ErrStaleCampaign
+	}
+	if err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("load campaign product: %w", err)
+	}
+	currentPriceValue, err := decimal.NewFromString(currentPrice)
+	if err != nil || currentCatalogVersion != input.SourceCatalogVersion ||
+		!currentPriceValue.Equal(inputPrice) {
+		return tools.LaunchCampaignOutput{}, tools.ErrStaleCampaign
+	}
+
+	var launchedAt time.Time
+	err = tx.QueryRow(
+		ctx,
+		`UPDATE campaign_drafts
+		 SET status = 'launched', launched_at = now(), updated_at = now()
+		 WHERE id = $1 AND status = 'approved'
+		 RETURNING launched_at`,
+		input.DraftID,
+	).Scan(&launchedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tools.LaunchCampaignOutput{}, tools.ErrApprovalMismatch
+	}
+	if err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("launch campaign: %w", err)
+	}
+
+	output := tools.LaunchCampaignOutput{
+		Status:     "executed",
+		ActionID:   input.ActionID,
+		DraftID:    input.DraftID,
+		SKU:        input.SKU,
+		LaunchedAt: launchedAt.UTC().Format(time.RFC3339),
+		Replayed:   false,
+	}
+	resultJSON, err := json.Marshal(output)
+	if err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("encode execution result: %w", err)
+	}
+	_, err = tx.Exec(
+		ctx,
+		`UPDATE approved_actions
+		 SET status = 'executed', executed_at = $2, result = $3::jsonb
+		 WHERE id = $1`,
+		input.ActionID,
+		launchedAt,
+		resultJSON,
+	)
+	if err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("record execution result: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return tools.LaunchCampaignOutput{}, fmt.Errorf("commit transaction: %w", err)
+	}
+	return output, nil
+}
+
 func loadApprovedAction(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -392,6 +550,21 @@ func catalogPayloadMatches(
 	return payload.DraftID == input.DraftID &&
 		payload.ProductSKU == input.SKU &&
 		payload.ExpectedCatalogVersion == input.ExpectedCatalogVersion
+}
+
+func campaignPayloadMatches(
+	payload campaignLaunchPayload,
+	input tools.LaunchCampaignInput,
+) bool {
+	payloadPrice, payloadErr := decimal.NewFromString(payload.SourcePrice)
+	inputPrice, inputErr := decimal.NewFromString(input.SourcePrice)
+	if payloadErr != nil || inputErr != nil {
+		return false
+	}
+	return payload.DraftID == input.DraftID &&
+		payload.ProductSKU == input.SKU &&
+		payload.SourceCatalogVersion == input.SourceCatalogVersion &&
+		payloadPrice.Equal(inputPrice)
 }
 
 func normalizedPrice(value string) string {

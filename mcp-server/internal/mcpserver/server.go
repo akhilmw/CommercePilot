@@ -11,6 +11,7 @@ import (
 func New(
 	priceUpdater tools.PriceUpdater,
 	catalogPublisher tools.CatalogPublisher,
+	campaignLauncher tools.CampaignLauncher,
 ) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{
@@ -40,6 +41,17 @@ func New(
 				"Rejects altered approvals, missing drafts, and stale catalog versions.",
 		},
 		catalogTool.Handle,
+	)
+
+	campaignTool := tools.NewLaunchCampaignTool(campaignLauncher)
+	mcp.AddTool(
+		server,
+		&mcp.Tool{
+			Name: "launch_campaign",
+			Description: "Launch one exact, human-approved campaign draft. " +
+				"Rejects altered approvals and stale catalog or price state.",
+		},
+		campaignTool.Handle,
 	)
 	return server
 }

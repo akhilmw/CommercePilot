@@ -5,6 +5,7 @@ import pytest
 
 from commercepilot.mcp.client import (
     CommercePilotMCPClient,
+    LaunchCampaignRequest,
     MCPToolExecutionError,
     PublishCatalogUpdateRequest,
     UpdateProductPriceRequest,
@@ -31,6 +32,17 @@ def make_catalog_request() -> PublishCatalogUpdateRequest:
     )
 
 
+def make_campaign_request() -> LaunchCampaignRequest:
+    return LaunchCampaignRequest(
+        action_id="3bcbd5d7-49ab-4593-8e8d-f99636690519",
+        idempotency_key="campaign-launch:3bcbd5d7",
+        draft_id="3bcbd5d7-49ab-4593-8e8d-f99636690519",
+        sku="NOVA-AUDIO-001",
+        source_catalog_version=3,
+        source_price="99.99",
+    )
+
+
 @pytest.mark.asyncio
 @patch("commercepilot.mcp.client.Client")
 async def test_update_product_price_returns_structured_result(
@@ -50,9 +62,9 @@ async def test_update_product_price_returns_structured_result(
         is_error=False,
     )
 
-    result = await CommercePilotMCPClient(
-        "http://localhost:8081"
-    ).update_product_price(make_request())
+    result = await CommercePilotMCPClient("http://localhost:8081").update_product_price(
+        make_request()
+    )
 
     assert result.status == "executed"
     assert result.current_price == "119.99"
@@ -81,9 +93,9 @@ async def test_update_product_price_raises_structured_tool_error(
     )
 
     with pytest.raises(MCPToolExecutionError, match="approval_not_found"):
-        await CommercePilotMCPClient(
-            "http://localhost:8081"
-        ).update_product_price(make_request())
+        await CommercePilotMCPClient("http://localhost:8081").update_product_price(
+            make_request()
+        )
 
 
 @pytest.mark.asyncio
@@ -138,6 +150,61 @@ async def test_publish_catalog_update_raises_structured_tool_error(
     )
 
     with pytest.raises(MCPToolExecutionError, match="stale_catalog"):
-        await CommercePilotMCPClient(
-            "http://localhost:8081"
-        ).publish_catalog_update(make_catalog_request())
+        await CommercePilotMCPClient("http://localhost:8081").publish_catalog_update(
+            make_catalog_request()
+        )
+
+
+@pytest.mark.asyncio
+@patch("commercepilot.mcp.client.Client")
+async def test_launch_campaign_returns_structured_result(
+    client_factory: AsyncMock,
+) -> None:
+    session = client_factory.return_value.__aenter__.return_value
+    session.call_tool.return_value = SimpleNamespace(
+        structured_content={
+            "status": "executed",
+            "action_id": make_campaign_request().action_id,
+            "draft_id": make_campaign_request().draft_id,
+            "sku": "NOVA-AUDIO-001",
+            "launched_at": "2026-11-20T18:00:00Z",
+            "replayed": False,
+        },
+        is_error=False,
+    )
+
+    result = await CommercePilotMCPClient("http://localhost:8081").launch_campaign(
+        make_campaign_request()
+    )
+
+    assert result.status == "executed"
+    assert result.launched_at == "2026-11-20T18:00:00Z"
+    session.call_tool.assert_awaited_once_with(
+        "launch_campaign",
+        arguments=make_campaign_request().model_dump(mode="json"),
+    )
+
+
+@pytest.mark.asyncio
+@patch("commercepilot.mcp.client.Client")
+async def test_launch_campaign_raises_structured_tool_error(
+    client_factory: AsyncMock,
+) -> None:
+    session = client_factory.return_value.__aenter__.return_value
+    session.call_tool.return_value = SimpleNamespace(
+        structured_content={
+            "status": "rejected",
+            "action_id": make_campaign_request().action_id,
+            "draft_id": make_campaign_request().draft_id,
+            "sku": "NOVA-AUDIO-001",
+            "replayed": False,
+            "error_code": "stale_campaign",
+            "message": "campaign source state changed after approval",
+        },
+        is_error=True,
+    )
+
+    with pytest.raises(MCPToolExecutionError, match="stale_campaign"):
+        await CommercePilotMCPClient("http://localhost:8081").launch_campaign(
+            make_campaign_request()
+        )

@@ -256,6 +256,15 @@ def test_validate_catalog_draft_rejects_absolute_claim() -> None:
         validate_catalog_draft(draft, evidence)
 
 
+def test_validate_catalog_copy_quality_rejects_control_characters() -> None:
+    evidence = make_evidence()
+    draft = make_draft(evidence)
+    draft.seo_title = "NovaSound Pro \u0014 Wireless Noise-Cancelling Headphones"
+
+    with pytest.raises(ValueError, match=r"invalid control characters: U\+0014"):
+        validate_catalog_copy_quality(draft, evidence)
+
+
 def test_validate_catalog_draft_rejects_bullet_missing_from_supporting_ids() -> None:
     evidence = make_evidence()
     draft = make_draft(evidence)

@@ -14,6 +14,19 @@ class CatalogDraftStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class CampaignDraftStatus(StrEnum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    LAUNCHED = "launched"
+    REJECTED = "rejected"
+
+
+class CampaignChannel(StrEnum):
+    EMAIL = "email"
+    SOCIAL = "social"
+    PAID_SEARCH = "paid_search"
+
+
 class PriceChangeType(StrEnum):
     INITIAL = "initial"
     DECREASED = "decreased"

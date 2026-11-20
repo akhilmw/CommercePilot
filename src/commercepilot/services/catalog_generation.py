@@ -305,6 +305,22 @@ def validate_catalog_copy_quality(
         )
 
     draft_text = _draft_text(draft)
+    invalid_control_characters = sorted(
+        {
+            character
+            for character in draft_text
+            if unicodedata.category(character) in {"Cc", "Cf"}
+            and character not in {"\n", "\t"}
+        }
+    )
+    if invalid_control_characters:
+        characters = ", ".join(
+            f"U+{ord(character):04X}" for character in invalid_control_characters
+        )
+        raise ValueError(
+            "Catalog copy contains invalid control characters: " + characters
+        )
+
     unexpected_letters = sorted(
         {
             character

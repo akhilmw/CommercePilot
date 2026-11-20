@@ -98,6 +98,10 @@ func classifyError(err error) string {
 		return "catalog_draft_not_found"
 	case errors.Is(err, ErrStaleCatalog):
 		return "stale_catalog"
+	case errors.Is(err, ErrCampaignDraftNotFound):
+		return "campaign_draft_not_found"
+	case errors.Is(err, ErrStaleCampaign):
+		return "stale_campaign"
 	default:
 		return "execution_failed"
 	}

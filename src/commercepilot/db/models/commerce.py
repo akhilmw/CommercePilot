@@ -27,6 +27,7 @@ from commercepilot.db.base import Base
 from commercepilot.models.enums import ProductStatus
 
 if TYPE_CHECKING:
+    from commercepilot.db.models.campaign import CampaignDraftRecord
     from commercepilot.db.models.catalog import CatalogDraftRecord
 
 
@@ -127,6 +128,11 @@ class Product(Base):
         passive_deletes=True,
     )
     catalog_drafts: Mapped[list[CatalogDraftRecord]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    campaign_drafts: Mapped[list[CampaignDraftRecord]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
         passive_deletes=True,

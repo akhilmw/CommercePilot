@@ -26,10 +26,17 @@ func (fakePriceUpdater) ExecuteCatalogPublish(
 	return tools.PublishCatalogUpdateOutput{}, nil
 }
 
+func (fakePriceUpdater) ExecuteCampaignLaunch(
+	_ context.Context,
+	_ tools.LaunchCampaignInput,
+) (tools.LaunchCampaignOutput, error) {
+	return tools.LaunchCampaignOutput{}, nil
+}
+
 func TestStreamableHTTPExposesUpdateProductPrice(t *testing.T) {
 	t.Parallel()
 
-	server := New(fakePriceUpdater{}, fakePriceUpdater{})
+	server := New(fakePriceUpdater{}, fakePriceUpdater{}, fakePriceUpdater{})
 	httpServer := httptest.NewServer(HTTPHandler(server))
 	defer httpServer.Close()
 
@@ -51,15 +58,16 @@ func TestStreamableHTTPExposesUpdateProductPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools over streamable HTTP: %v", err)
 	}
-	if len(result.Tools) != 2 {
-		t.Fatalf("expected two tools, got %#v", result.Tools)
+	if len(result.Tools) != 3 {
+		t.Fatalf("expected three tools, got %#v", result.Tools)
 	}
 	toolNames := map[string]bool{}
 	for _, tool := range result.Tools {
 		toolNames[tool.Name] = true
 	}
 	if !toolNames["update_product_price"] ||
-		!toolNames["publish_catalog_update"] {
+		!toolNames["publish_catalog_update"] ||
+		!toolNames["launch_campaign"] {
 		t.Fatalf("unexpected tools result: %#v", result.Tools)
 	}
 }
@@ -68,7 +76,7 @@ func TestServerExposesCommerceTools(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	server := New(fakePriceUpdater{}, fakePriceUpdater{})
+	server := New(fakePriceUpdater{}, fakePriceUpdater{}, fakePriceUpdater{})
 	client := mcp.NewClient(
 		&mcp.Implementation{Name: "commercepilot-test", Version: "0.1.0"},
 		nil,
@@ -91,15 +99,16 @@ func TestServerExposesCommerceTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if len(result.Tools) != 2 {
-		t.Fatalf("expected two tools, got %d", len(result.Tools))
+	if len(result.Tools) != 3 {
+		t.Fatalf("expected three tools, got %d", len(result.Tools))
 	}
 	toolNames := map[string]bool{}
 	for _, tool := range result.Tools {
 		toolNames[tool.Name] = true
 	}
 	if !toolNames["update_product_price"] ||
-		!toolNames["publish_catalog_update"] {
+		!toolNames["publish_catalog_update"] ||
+		!toolNames["launch_campaign"] {
 		t.Fatalf("unexpected tools: %#v", result.Tools)
 	}
 }

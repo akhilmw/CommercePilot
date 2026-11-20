@@ -2,8 +2,15 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from commercepilot.mcp.client import (
+    LaunchCampaignResult,
     PublishCatalogUpdateResult,
     UpdateProductPriceResult,
+)
+from commercepilot.models.campaign import (
+    CampaignAsset,
+    CampaignDraft,
+    CampaignEvidenceSet,
+    CampaignLaunchPreview,
 )
 from commercepilot.models.catalog import (
     CatalogComparison,
@@ -17,9 +24,12 @@ from commercepilot.models.competitor import (
 )
 from commercepilot.models.enums import (
     ActionType,
+    CampaignChannel,
+    CampaignDraftStatus,
     CatalogDraftStatus,
     CompetitiveThreatLevel,
     ImprovementPriority,
+    ProductStatus,
     ReviewSentiment,
     SourceAgent,
 )
@@ -41,6 +51,12 @@ CHECKPOINT_TYPES = [
     ActionProposal,
     ActionType,
     ApprovalPolicyResult,
+    CampaignAsset,
+    CampaignChannel,
+    CampaignDraft,
+    CampaignDraftStatus,
+    CampaignEvidenceSet,
+    CampaignLaunchPreview,
     CatalogComparison,
     CatalogDraft,
     CatalogDraftStatus,
@@ -53,7 +69,9 @@ CHECKPOINT_TYPES = [
     GovernedAction,
     HumanApprovalDecision,
     ImprovementPriority,
+    LaunchCampaignResult,
     PriceChangeParameters,
+    ProductStatus,
     PublishCatalogUpdateResult,
     RequestedImprovement,
     ReviewInsight,

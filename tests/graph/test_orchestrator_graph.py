@@ -10,20 +10,26 @@ from langgraph.types import Command
 
 from commercepilot.graph.checkpoint import build_orchestrator_checkpointer
 from commercepilot.graph.orchestrator_graph import (
+    RUN_CAMPAIGN_AGENT_NODE,
     RUN_CATALOG_AGENT_NODE,
     build_catalog_comparison_node,
     build_orchestrator_graph,
+    execute_campaign_launch_node,
     execute_catalog_publish_node,
     persist_catalog_draft_node,
     process_catalog_approval_node,
+    request_campaign_approval_node,
     request_catalog_approval_node,
     route_after_synthesis,
 )
 from commercepilot.graph.orchestrator_state import CommercePilotState
-from commercepilot.mcp.client import PublishCatalogUpdateResult
+from commercepilot.mcp.client import LaunchCampaignResult, PublishCatalogUpdateResult
+from commercepilot.models.campaign import CampaignAsset, CampaignLaunchPreview
 from commercepilot.models.catalog import CatalogComparison, CatalogFieldDiff
 from commercepilot.models.enums import (
     ActionType,
+    CampaignChannel,
+    CampaignDraftStatus,
     CatalogDraftStatus,
     ImprovementPriority,
     SourceAgent,
@@ -39,6 +45,7 @@ def initial_state() -> CommercePilotState:
     return CommercePilotState(
         product_sku="NOVA-AUDIO-001",
         force_catalog_update=False,
+        force_campaign_update=False,
         review_insight=None,
         competitor_insight=None,
         strategy=None,
@@ -48,6 +55,13 @@ def initial_state() -> CommercePilotState:
         catalog_approval_decision=None,
         catalog_publish_action_id=None,
         catalog_execution_result=None,
+        campaign_evidence=None,
+        campaign_draft=None,
+        campaign_draft_id=None,
+        campaign_preview=None,
+        campaign_approval_decision=None,
+        campaign_launch_action_id=None,
+        campaign_execution_result=None,
         approval_policy=None,
         approval_decision=None,
         approved_action_ids=[],
@@ -55,6 +69,7 @@ def initial_state() -> CommercePilotState:
         review_error=None,
         competitor_error=None,
         catalog_error=None,
+        campaign_error=None,
         error=None,
     )
 
@@ -85,6 +100,30 @@ def test_force_catalog_routes_to_catalog_agent() -> None:
     assert route_after_synthesis(state) == RUN_CATALOG_AGENT_NODE
 
 
+def test_force_campaign_routes_to_campaign_agent() -> None:
+    state = initial_state()
+    state["force_campaign_update"] = True
+    state["strategy"] = CommerceStrategy(
+        product_sku="NOVA-AUDIO-001",
+        situation_summary="Evidence supports testing campaign messaging.",
+        strategic_objectives=["Test evidence-backed positioning."],
+        action_proposals=[
+            ActionProposal(
+                action_type=ActionType.MONITOR_COMPETITORS,
+                title="Continue competitor monitoring",
+                description="Track positioning and price changes.",
+                rationale="Ongoing monitoring supports future decisions.",
+                priority=ImprovementPriority.LOW,
+                source_agents=[SourceAgent.COMPETITOR],
+                evidence_ids=[uuid4()],
+            )
+        ],
+        confidence=0.8,
+    )
+
+    assert route_after_synthesis(state) == RUN_CAMPAIGN_AGENT_NODE
+
+
 @patch("commercepilot.graph.orchestrator_graph.synthesize_strategy_node")
 @patch("commercepilot.graph.orchestrator_graph.run_competitor_agent_node")
 @patch("commercepilot.graph.orchestrator_graph.run_review_agent_node")
@@ -103,9 +142,9 @@ def test_orchestrator_combines_agents_and_applies_policy(
         strategic_objectives=["Protect conversion and product positioning."],
         action_proposals=[
             ActionProposal(
-                action_type=ActionType.DRAFT_CAMPAIGN,
-                title="Draft a value-focused campaign",
-                description="Prepare campaign copy about the product's value.",
+                action_type=ActionType.MONITOR_COMPETITORS,
+                title="Monitor competitor positioning",
+                description="Continue monitoring competitor positioning.",
                 rationale="A competitor is currently priced below our product.",
                 priority=ImprovementPriority.HIGH,
                 source_agents=[SourceAgent.COMPETITOR],
@@ -465,6 +504,67 @@ async def test_catalog_rejection_resumes_from_serialized_checkpoint() -> None:
     assert decision.comment == "Unsupported catalog claim."
 
 
+@pytest.mark.asyncio
+async def test_campaign_rejection_resumes_from_serialized_checkpoint() -> None:
+    state = initial_state()
+    draft_id = uuid4()
+    product_id = uuid4()
+    evidence_id = uuid4()
+    state["campaign_preview"] = CampaignLaunchPreview(
+        draft_id=draft_id,
+        product_id=product_id,
+        product_sku="NOVA-AUDIO-001",
+        status=CampaignDraftStatus.DRAFT,
+        source_catalog_version=3,
+        current_catalog_version=3,
+        source_price=Decimal("99.99"),
+        current_price=Decimal("99.99"),
+        is_stale=False,
+        name="NovaSound Commuter Campaign",
+        objective="Increase qualified visits from daily commuters.",
+        target_audience="Commuters seeking focused wireless listening.",
+        core_message="Balanced sound and long battery life for daily travel.",
+        assets=[
+            CampaignAsset(
+                channel=CampaignChannel.SOCIAL,
+                headline="Sound made for the daily journey",
+                body="Balanced wireless sound for focused daily travel.",
+                call_to_action="Explore NovaSound Pro",
+                evidence_ids=[evidence_id],
+            )
+        ],
+        duration_days=21,
+        success_metrics=["Click-through rate"],
+        confidence=Decimal("0.85"),
+    )
+
+    builder = StateGraph(CommercePilotState)
+    builder.add_node("request_campaign_approval", request_campaign_approval_node)
+    builder.add_edge(START, "request_campaign_approval")
+    builder.add_edge("request_campaign_approval", END)
+    graph = builder.compile(checkpointer=build_orchestrator_checkpointer())
+    config: RunnableConfig = {"configurable": {"thread_id": "campaign-rejection"}}
+
+    interrupted = await graph.ainvoke(state, config=config)
+    assert interrupted["__interrupt__"][0].value["draft_id"] == str(draft_id)
+
+    completed = await graph.ainvoke(
+        Command(
+            resume={
+                "approved": False,
+                "reviewer": "test-user",
+                "comment": "Campaign timing is not approved.",
+            }
+        ),
+        config=config,
+    )
+
+    decision = completed["campaign_approval_decision"]
+    assert decision is not None
+    assert decision.approved is False
+    assert decision.comment == "Campaign timing is not approved."
+
+
 @patch("commercepilot.graph.orchestrator_graph.process_catalog_approval")
 @patch("commercepilot.graph.orchestrator_graph.SessionLocal")
 def test_process_catalog_approval_node_stores_approved_action_id(
@@ -558,5 +658,54 @@ async def test_execute_catalog_publish_node_calls_mcp_with_approved_identifiers(
     assert update == {
         "catalog_execution_result": execution,
         "catalog_error": None,
+        "error": None,
+    }
+
+
+@pytest.mark.asyncio
+@patch("commercepilot.graph.orchestrator_graph.CommercePilotMCPClient")
+@patch("commercepilot.graph.orchestrator_graph.SessionLocal")
+async def test_execute_campaign_launch_calls_mcp_with_approved_snapshot(
+    session_factory: MagicMock,
+    client_factory: MagicMock,
+) -> None:
+    state = initial_state()
+    action_id = uuid4()
+    state["campaign_launch_action_id"] = action_id
+    action = MagicMock()
+    action.id = action_id
+    action.action_type = "launch_campaign"
+    action.idempotency_key = f"campaign-launch:{action_id}"
+    action.payload = {
+        "draft_id": str(action_id),
+        "product_sku": "NOVA-AUDIO-001",
+        "source_catalog_version": 3,
+        "source_price": "99.99",
+    }
+    session_factory.return_value.__enter__.return_value.get.return_value = action
+    execution = LaunchCampaignResult(
+        status="executed",
+        action_id=str(action_id),
+        draft_id=str(action_id),
+        sku="NOVA-AUDIO-001",
+        launched_at="2026-11-20T12:00:00Z",
+        replayed=False,
+    )
+    client = client_factory.return_value
+    client.launch_campaign = AsyncMock(return_value=execution)
+
+    update = await execute_campaign_launch_node(state)
+
+    awaited_call = client.launch_campaign.await_args
+    assert awaited_call is not None
+    request = awaited_call.args[0]
+    assert request.action_id == str(action_id)
+    assert request.draft_id == str(action_id)
+    assert request.sku == "NOVA-AUDIO-001"
+    assert request.source_catalog_version == 3
+    assert request.source_price == "99.99"
+    assert update == {
+        "campaign_execution_result": execution,
+        "campaign_error": None,
         "error": None,
     }
