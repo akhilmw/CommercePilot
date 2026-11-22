@@ -1,9 +1,16 @@
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
-from commercepilot.models.catalog import CatalogBullet, CatalogDraft
+from commercepilot.models.catalog import (
+    CatalogBullet,
+    CatalogComparison,
+    CatalogDraft,
+    CatalogFieldDiff,
+)
+from commercepilot.models.enums import CatalogDraftStatus
 
 
 def make_draft() -> CatalogDraft:
@@ -75,3 +82,28 @@ def test_catalog_draft_rejects_unknown_fields() -> None:
 
     with pytest.raises(ValidationError):
         CatalogDraft.model_validate(payload)
+
+
+def test_catalog_comparison_serializes_checkpoint_restored_field_dicts() -> None:
+    field = CatalogFieldDiff(
+        field="seo_title",
+        label="SEO title",
+        current_value="Old title",
+        proposed_value="Improved title",
+        changed=True,
+    )
+    comparison = CatalogComparison.model_construct(
+        draft_id=uuid4(),
+        product_id=uuid4(),
+        product_sku="NOVA-AUDIO-001",
+        status=CatalogDraftStatus.DRAFT,
+        current_catalog_version=1,
+        expected_catalog_version=1,
+        is_stale=False,
+        fields=cast(Any, [field.model_dump(mode="json")]),
+    )
+
+    serialized = comparison.model_dump(mode="json")
+
+    assert serialized["fields"] == [field.model_dump(mode="json")]
+    assert serialized["has_changes"] is True

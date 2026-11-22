@@ -24,6 +24,31 @@ config.set_main_option(
 
 target_metadata = Base.metadata
 
+LANGGRAPH_CHECKPOINT_TABLES = {
+    "checkpoint_blobs",
+    "checkpoint_migrations",
+    "checkpoint_writes",
+    "checkpoints",
+}
+
+
+def include_object(
+    object_: object,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to: object | None,
+) -> bool:
+    del reflected, compare_to
+    if type_ == "table" and name in LANGGRAPH_CHECKPOINT_TABLES:
+        return False
+    if type_ == "index":
+        table = getattr(object_, "table", None)
+        if getattr(table, "name", None) in LANGGRAPH_CHECKPOINT_TABLES:
+            return False
+    return True
+
+
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
@@ -49,6 +74,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -73,6 +99,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

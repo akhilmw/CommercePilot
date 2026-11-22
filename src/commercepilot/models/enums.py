@@ -27,6 +27,20 @@ class CampaignChannel(StrEnum):
     PAID_SEARCH = "paid_search"
 
 
+class OrchestrationRunStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ApprovalRequestStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class PriceChangeType(StrEnum):
     INITIAL = "initial"
     DECREASED = "decreased"

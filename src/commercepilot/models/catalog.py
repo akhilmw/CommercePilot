@@ -6,6 +6,7 @@ from pydantic import (
     ConfigDict,
     Field,
     computed_field,
+    field_serializer,
     model_validator,
 )
 
@@ -111,6 +112,14 @@ class CatalogComparison(BaseModel):
     expected_catalog_version: int = Field(ge=1)
     is_stale: bool
     fields: list[CatalogFieldDiff] = Field(min_length=1)
+
+    @field_serializer("fields")
+    def serialize_fields(self, fields: list[Any]) -> list[dict[str, Any]]:
+        """Normalize nested diffs restored from durable graph checkpoints."""
+        return [
+            CatalogFieldDiff.model_validate(field).model_dump(mode="json")
+            for field in fields
+        ]
 
     @computed_field
     @property

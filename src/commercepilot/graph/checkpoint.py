@@ -82,9 +82,11 @@ CHECKPOINT_TYPES = [
 ]
 
 
-def build_orchestrator_checkpointer() -> InMemorySaver:
-    return InMemorySaver(
-        serde=JsonPlusSerializer(
-            allowed_msgpack_modules=CHECKPOINT_TYPES,
-        )
+def build_checkpoint_serializer() -> JsonPlusSerializer:
+    return JsonPlusSerializer(
+        allowed_msgpack_modules=CHECKPOINT_TYPES,
     )
+
+
+def build_orchestrator_checkpointer() -> InMemorySaver:
+    return InMemorySaver(serde=build_checkpoint_serializer())

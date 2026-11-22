@@ -8,9 +8,14 @@ from commercepilot.db.models.commerce import (
     Product,
     Review,
 )
+from commercepilot.db.models.orchestration import (
+    ApprovalRequest,
+    OrchestrationRun,
+)
 
 __all__ = [
     "ApprovedAction",
+    "ApprovalRequest",
     "CampaignDraftRecord",
     "CatalogDraftRecord",
     "Competitor",
@@ -18,4 +23,5 @@ __all__ = [
     "CompetitorProduct",
     "Product",
     "Review",
+    "OrchestrationRun",
 ]
