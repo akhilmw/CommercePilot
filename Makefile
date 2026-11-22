@@ -1,4 +1,4 @@
-.PHONY: install api go-server web db-up db-down test lint
+.PHONY: install api go-server web up up-detached down logs db-up db-down test lint
 
 install:
 	uv sync
@@ -12,6 +12,18 @@ go-server:
 
 web:
 	cd web && npm run dev
+
+up:
+	docker compose up --build
+
+up-detached:
+	docker compose up -d --build
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f api worker mcp web
 
 db-up:
 	docker compose up -d db

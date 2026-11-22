@@ -15,6 +15,87 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+    command: ["alembic", "upgrade", "head"]
+    environment: &python-environment
+      COMMERCEPILOT_ENVIRONMENT: ${COMMERCEPILOT_ENVIRONMENT:-local}
+      COMMERCEPILOT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commercepilot}:${POSTGRES_PASSWORD:-commercepilot}@db:5432/${POSTGRES_DB:-commercepilot}
+      COMMERCEPILOT_MCP_BASE_URL: http://mcp:8081
+      COMMERCEPILOT_OPENAI_API_KEY: ${COMMERCEPILOT_OPENAI_API_KEY:-}
+      COMMERCEPILOT_OPENAI_MODEL: ${COMMERCEPILOT_OPENAI_MODEL:-gpt-5-mini}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  mcp:
+    build:
+      context: ./mcp-server
+    environment:
+      COMMERCEPILOT_MCP_PORT: "8081"
+      COMMERCEPILOT_MCP_DATABASE_URL: postgresql://${POSTGRES_USER:-commercepilot}:${POSTGRES_PASSWORD:-commercepilot}@db:5432/${POSTGRES_DB:-commercepilot}?sslmode=disable
+    ports:
+      - "8081:8081"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+    command: ["uvicorn", "commercepilot.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *python-environment
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mcp:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+    command: ["python", "scripts/run_orchestration_worker.py", "--poll-interval", "2"]
+    environment: *python-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mcp:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   commercepilot_postgres_data:
