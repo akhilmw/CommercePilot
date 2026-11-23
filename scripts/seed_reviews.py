@@ -7,14 +7,15 @@ from commercepilot.services.review_ingestion import ingest_reviews
 PRODUCT_SKU = "NOVA-AUDIO-001"
 
 
-def review(
+def make_review(
+    prefix: str,
     number: int,
     rating: int,
     title: str,
     body: str,
 ) -> ReviewCreate:
     return ReviewCreate(
-        source_review_id=f"synthetic-ns-{number:03d}",
+        source_review_id=f"synthetic-{prefix}-{number:03d}",
         source="synthetic-novacart",
         rating=rating,
         title=title,
@@ -22,6 +23,15 @@ def review(
         verified_purchase=number % 6 != 0,
         reviewed_at=datetime(2026, 11, number, 12, tzinfo=UTC),
     )
+
+
+def review(
+    number: int,
+    rating: int,
+    title: str,
+    body: str,
+) -> ReviewCreate:
+    return make_review("ns", number, rating, title, body)
 
 
 SYNTHETIC_REVIEWS = (
@@ -202,13 +212,221 @@ SYNTHETIC_REVIEWS = (
     ),
 )
 
+NOVA_FIT_REVIEWS = (
+    make_review(
+        "nf",
+        1,
+        5,
+        "Battery easily lasts the week",
+        "I track workouts and sleep every day and still get almost a full "
+        "week between charges.",
+    ),
+    make_review(
+        "nf",
+        2,
+        5,
+        "Bright display outdoors",
+        "The AMOLED screen stays clear in direct sunlight and workout stats "
+        "are easy to read while running.",
+    ),
+    make_review(
+        "nf",
+        3,
+        4,
+        "Accurate heart-rate tracking",
+        "Heart-rate readings closely match the chest strap I use at the gym, "
+        "and the activity summaries are useful.",
+    ),
+    make_review(
+        "nf",
+        4,
+        2,
+        "GPS takes too long to lock",
+        "Outdoor runs sometimes begin before GPS connects, leaving the first "
+        "part of my route and distance inaccurate.",
+    ),
+    make_review(
+        "nf",
+        5,
+        2,
+        "Sleep tracking misses wake-ups",
+        "The watch reports solid sleep even when I wake several times during "
+        "the night, so the sleep score is not reliable.",
+    ),
+    make_review(
+        "nf",
+        6,
+        3,
+        "Comfortable watch, irritating strap",
+        "The watch body is light, but the included silicone strap irritates "
+        "my skin after long workouts.",
+    ),
+    make_review(
+        "nf",
+        7,
+        4,
+        "Great fitness dashboard",
+        "Workout trends, recovery summaries, and heart-rate zones are "
+        "presented clearly without overwhelming me.",
+    ),
+    make_review(
+        "nf",
+        8,
+        2,
+        "Notifications arrive late",
+        "Messages occasionally appear several minutes late when the watch is "
+        "connected to my Android phone.",
+    ),
+    make_review(
+        "nf",
+        9,
+        4,
+        "Excellent for swimming",
+        "Pool workouts and lap counts have been dependable, and the watch "
+        "has handled regular swimming without issues.",
+    ),
+    make_review(
+        "nf",
+        10,
+        3,
+        "Good hardware, confusing app",
+        "The watch itself is responsive, but finding historical health data "
+        "inside the phone app takes too many taps.",
+    ),
+    make_review(
+        "nf",
+        11,
+        5,
+        "Useful without daily charging",
+        "Long battery life, clear exercise metrics, and a sharp screen make "
+        "this easy to wear every day.",
+    ),
+    make_review(
+        "nf",
+        12,
+        2,
+        "GPS distance drifts under trees",
+        "Distance and pace become inconsistent on wooded trails even after "
+        "the watch confirms a GPS connection.",
+    ),
+)
+
+NOVA_BREW_REVIEWS = (
+    make_review(
+        "nb",
+        1,
+        5,
+        "Rich espresso from a compact machine",
+        "Shots have a thick crema and balanced flavor, while the machine "
+        "takes very little counter space.",
+    ),
+    make_review(
+        "nb",
+        2,
+        4,
+        "Ready before I grind the beans",
+        "The thermoblock heats quickly and produces consistent espresso on "
+        "busy mornings.",
+    ),
+    make_review(
+        "nb",
+        3,
+        2,
+        "Steam wand lacks power",
+        "The steam wand takes too long to texture milk and struggles to make "
+        "fine foam for lattes.",
+    ),
+    make_review(
+        "nb",
+        4,
+        2,
+        "Drip tray overflows easily",
+        "The shallow drip tray fills after only a few drinks and spills when "
+        "I carry it to the sink.",
+    ),
+    make_review(
+        "nb",
+        5,
+        4,
+        "Consistent pressure and crema",
+        "Once the grind is dialed in, the machine pulls repeatable shots with "
+        "good crema and temperature.",
+    ),
+    make_review(
+        "nb",
+        6,
+        3,
+        "Cleaning instructions are unclear",
+        "The machine works well, but the manual does not clearly explain the "
+        "descaling cycle or when each part should be cleaned.",
+    ),
+    make_review(
+        "nb",
+        7,
+        5,
+        "Ideal for a small apartment",
+        "It heats fast, fits beneath my cabinets, and makes much better coffee "
+        "than my old pod machine.",
+    ),
+    make_review(
+        "nb",
+        8,
+        2,
+        "Portafilter drips after brewing",
+        "Water continues dripping from the group head and leaves a mess after "
+        "the shot finishes.",
+    ),
+    make_review(
+        "nb",
+        9,
+        4,
+        "Simple controls for beginners",
+        "The buttons are straightforward and I learned to pull a good double "
+        "shot within a few attempts.",
+    ),
+    make_review(
+        "nb",
+        10,
+        3,
+        "Good espresso, weak milk drinks",
+        "Espresso quality is impressive for the price, but steaming enough "
+        "milk for two cappuccinos is slow.",
+    ),
+    make_review(
+        "nb",
+        11,
+        5,
+        "Fast and dependable every morning",
+        "Heat-up is quick and shot temperature has stayed consistent through "
+        "several weeks of daily use.",
+    ),
+    make_review(
+        "nb",
+        12,
+        2,
+        "Water tank is awkward to remove",
+        "The rear tank catches beneath my cabinets and is difficult to refill "
+        "without moving the whole machine.",
+    ),
+)
+
+REVIEW_DATASETS = {
+    PRODUCT_SKU: SYNTHETIC_REVIEWS,
+    "NOVA-WEAR-001": NOVA_FIT_REVIEWS,
+    "NOVA-HOME-001": NOVA_BREW_REVIEWS,
+}
+
 
 def seed_reviews() -> None:
     with SessionLocal() as session:
-        result = ingest_reviews(session, PRODUCT_SKU, SYNTHETIC_REVIEWS)
+        results = [
+            ingest_reviews(session, product_sku, reviews)
+            for product_sku, reviews in REVIEW_DATASETS.items()
+        ]
         session.commit()
 
-    print(result)
+    for result in results:
+        print(result)
 
 
 if __name__ == "__main__":
