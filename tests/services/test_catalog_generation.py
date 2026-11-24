@@ -372,6 +372,16 @@ def test_catalog_quality_rejects_competitor_content_in_feature_bullet() -> None:
         validate_catalog_copy_quality(draft, evidence)
 
 
+def test_catalog_quality_allows_product_monitoring_capability() -> None:
+    evidence = make_evidence()
+    draft = make_draft(evidence)
+    draft.target_audience = (
+        "Listeners who value battery monitoring during everyday use and travel."
+    )
+
+    validate_catalog_copy_quality(draft, evidence)
+
+
 def test_generate_catalog_draft_retries_failed_quality_gate() -> None:
     evidence = make_evidence()
     invalid_draft = make_draft(evidence)
@@ -394,3 +404,32 @@ def test_generate_catalog_draft_retries_failed_quality_gate() -> None:
     assert client.responses.parse.call_count == 3
     retry_input = client.responses.parse.call_args_list[1].kwargs["input"]
     assert "unexpected non-Latin characters" in retry_input
+
+
+def test_generate_catalog_draft_retries_schema_validation_error() -> None:
+    evidence = make_evidence()
+    corrected_draft = make_draft(evidence)
+    verification = supported_verification(corrected_draft)
+    client = MagicMock()
+
+    with pytest.raises(ValueError) as invalid_draft:
+        CatalogDraft.model_validate(
+            {
+                **corrected_draft.model_dump(),
+                "meta_description": "Too short.",
+            }
+        )
+
+    client.responses.parse.side_effect = [
+        invalid_draft.value,
+        MagicMock(output_parsed=corrected_draft),
+        MagicMock(output_parsed=verification),
+    ]
+
+    result = generate_catalog_draft(evidence, client, "test-model")
+
+    assert result == corrected_draft
+    assert client.responses.parse.call_count == 3
+    retry_input = client.responses.parse.call_args_list[1].kwargs["input"]
+    assert "invalid catalog draft" in retry_input
+    assert "meta_description" in retry_input

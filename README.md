@@ -7,7 +7,10 @@ controlled commerce tools, while every publishing action requires human approval
 
 ## Current status
 
-Week 1 foundation: repository scaffolding and service health checks.
+CommercePilot currently includes three seeded products, persistent orchestration
+runs, human approval workflows, catalog and campaign agents, a Go MCP tool server,
+and a React operations dashboard. A 30-scenario evaluation suite measures agent
+grounding, competitive analysis, routing, approval policy, and generated content.
 
 ## Architecture
 
@@ -40,18 +43,17 @@ Install Python and frontend dependencies:
 make install
 ```
 
-Start PostgreSQL:
+Start the complete stack:
 
 ```bash
-make db-up
+docker compose up -d --build
 ```
 
-Run each application in its own terminal:
+Seed the demo catalog and reviews:
 
 ```bash
-make api
-make go-server
-make web
+uv run python scripts/seed_catalog.py
+uv run python scripts/seed_reviews.py
 ```
 
 Health endpoints:
@@ -67,6 +69,25 @@ make lint
 make test
 ```
 
-The project intentionally begins with health checks only. Domain models, MCP tools,
-LangGraph agents, and publishing workflows will be implemented incrementally.
+## Agent evaluations
+
+Run all 30 controlled scenarios:
+
+```bash
+uv run python scripts/evaluate_agents.py
+```
+
+Run selected scenarios while iterating on one agent:
+
+```bash
+uv run python scripts/evaluate_agents.py \
+  --case review-novafit-core-themes \
+  --case strategy-novafit-grounding
+```
+
+Reports are written to `artifacts/evaluations/` and include per-check results,
+case latency, aggregate pass rate, and model configuration. Evaluation calls use
+a bounded request timeout and cache shared agent outputs within each run. The
+evaluation path never publishes catalog changes, launches campaigns, or changes
+product prices.
 

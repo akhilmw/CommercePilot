@@ -30,6 +30,15 @@ supporting_evidence_ids and produce polished English copy. Store citations only
 in evidence_ids fields; never write UUIDs, an "Evidence:" section, or citation
 metadata into headlines, bodies, calls to action, or other public copy.
 
+Treat documented complaints and requested improvements as explicit negative
+claim guardrails. If evidence reports instability, unreliability, delays,
+discomfort, poor quality, or another weakness for a capability, never describe
+that capability as reliable, dependable, stable, consistent, seamless,
+excellent, or otherwise positively qualified. You may state a neutral product
+specification only when the product record supports it. When correcting a
+rejected draft, remove every contradicted assertion completely; do not replace
+it with a synonym or a softer version of the same unsupported claim.
+
 Respect channel limits: email headlines at most 78 characters; social headlines
 at most 80 characters and bodies at most 280 characters; paid-search headlines
 at most 30 characters and bodies at most 90 characters.
@@ -78,6 +87,39 @@ CHANNEL_COPY_LIMITS = {
     "paid_search": (30, 90),
 }
 MAX_CAMPAIGN_GENERATION_ATTEMPTS = 2
+
+
+def _campaign_claim_guardrails(
+    evidence: CampaignEvidenceSet,
+) -> dict[str, object]:
+    review = evidence.review_insight
+    return {
+        "documented_complaints": [
+            {
+                "theme": complaint.theme,
+                "summary": complaint.summary,
+                "evidence_review_ids": [
+                    str(value) for value in complaint.evidence_review_ids
+                ],
+            }
+            for complaint in review.complaints
+        ],
+        "requested_improvements": [
+            {
+                "recommendation": improvement.recommendation,
+                "rationale": improvement.rationale,
+                "evidence_review_ids": [
+                    str(value) for value in improvement.evidence_review_ids
+                ],
+            }
+            for improvement in review.requested_improvements
+        ],
+        "claim_rule": (
+            "Never positively qualify a capability implicated by a complaint "
+            "or requested improvement. Omit the quality claim or state only a "
+            "neutral, product-record-backed specification."
+        ),
+    }
 
 
 def _complete_sentence(text: str, max_length: int) -> str:
@@ -319,7 +361,11 @@ def generate_campaign_draft(
     client: OpenAI,
     model: str,
 ) -> CampaignDraft:
-    request: dict[str, object] = {"evidence": evidence.model_dump(mode="json")}
+    claim_guardrails = _campaign_claim_guardrails(evidence)
+    request: dict[str, object] = {
+        "evidence": evidence.model_dump(mode="json"),
+        "customer_claim_guardrails": claim_guardrails,
+    }
     last_error: ValueError | None = None
 
     for attempt in range(MAX_CAMPAIGN_GENERATION_ATTEMPTS):
@@ -345,13 +391,16 @@ def generate_campaign_draft(
         if attempt + 1 < MAX_CAMPAIGN_GENERATION_ATTEMPTS:
             request = {
                 "evidence": evidence.model_dump(mode="json"),
+                "customer_claim_guardrails": claim_guardrails,
                 "previous_invalid_draft": (
                     draft.model_dump(mode="json") if draft is not None else None
                 ),
                 "validation_error": str(last_error),
                 "correction_required": (
-                    "Regenerate the complete campaign draft and correct every "
-                    "reported issue. Copy evidence IDs exactly."
+                    "Regenerate the complete campaign draft. Remove every "
+                    "contradicted assertion identified by the verifier; do not "
+                    "replace it with a synonym or softened reliability claim. "
+                    "Copy evidence IDs exactly."
                 ),
             }
 

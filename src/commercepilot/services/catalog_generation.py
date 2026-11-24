@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from openai import OpenAI
+from pydantic import ValidationError
 
 from commercepilot.models.catalog import (
     CatalogClaim,
@@ -39,6 +40,12 @@ promotions, monitoring, triggers, roadmaps, or other internal operational
 instructions. Price is rendered separately by the storefront and must not be
 embedded in catalog copy. Write complete, polished English sentences without
 corrupted or mixed-script text.
+
+Respect every structured-output length constraint. In particular, write a
+complete meta description between 50 and 160 characters and a complete product
+description between 100 and 1500 characters. Do not terminate a sentence after
+the leading digit of a decimal specification; preserve values such as
+"1.7-inch" as a complete token.
 
 Do not infer features merely because they are common for the product category.
 For example, never add padded earcups, an adjustable headband, physical
@@ -77,7 +84,9 @@ FORBIDDEN_STOREFRONT_PHRASES = (
     "competitor",
     "current price",
     "listed at",
-    "monitor",
+    "monitor competitor",
+    "monitor price",
+    "price monitoring",
     "price activity",
     "price match",
     "promotion",
@@ -89,7 +98,7 @@ DANGLING_ATTRIBUTION_PATTERN = re.compile(
     r"(?:describe|indicate|mention|note|report|say)\.$",
     re.IGNORECASE,
 )
-MAX_CATALOG_GENERATION_ATTEMPTS = 2
+MAX_CATALOG_GENERATION_ATTEMPTS = 3
 
 
 def _complete_sentence(text: str, max_length: int) -> str:
@@ -449,16 +458,21 @@ def generate_catalog_draft(
     last_error: ValueError | None = None
 
     for attempt in range(MAX_CATALOG_GENERATION_ATTEMPTS):
-        response = client.responses.parse(
-            model=model,
-            instructions=CATALOG_GENERATION_INSTRUCTIONS,
-            input=json.dumps(request),
-            text_format=CatalogDraft,
-        )
-        draft = response.output_parsed
-        if draft is None:
-            last_error = ValueError("The model returned no structured catalog draft.")
-        else:
+        draft: CatalogDraft | None = None
+        try:
+            response = client.responses.parse(
+                model=model,
+                instructions=CATALOG_GENERATION_INSTRUCTIONS,
+                input=json.dumps(request),
+                text_format=CatalogDraft,
+            )
+            draft = response.output_parsed
+        except ValidationError as error:
+            last_error = ValueError(
+                "The model returned an invalid catalog draft: " + str(error)
+            )
+
+        if draft is not None:
             draft = normalize_catalog_copy(draft)
             try:
                 validate_catalog_draft(draft, evidence)
@@ -468,6 +482,8 @@ def generate_catalog_draft(
                 last_error = error
             else:
                 return draft
+        elif last_error is None:
+            last_error = ValueError("The model returned no structured catalog draft.")
 
         if attempt + 1 < MAX_CATALOG_GENERATION_ATTEMPTS:
             request = {
@@ -478,7 +494,10 @@ def generate_catalog_draft(
                 "validation_error": str(last_error),
                 "correction_required": (
                     "Regenerate the complete catalog draft and correct every "
-                    "reported issue. Do not reuse invalid copy."
+                    "reported issue. Do not reuse invalid copy. Ensure the "
+                    "meta description is a complete sentence between 50 and "
+                    "160 characters and the product description is between "
+                    "100 and 1500 characters."
                 ),
             }
 

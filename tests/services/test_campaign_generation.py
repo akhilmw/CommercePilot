@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -214,6 +215,35 @@ def test_generate_campaign_draft_returns_verified_output() -> None:
     assert client.responses.parse.call_count == 2
     generation_request = client.responses.parse.call_args_list[0].kwargs
     assert generation_request["text_format"] is CampaignDraft
+    request_payload = json.loads(generation_request["input"])
+    assert "customer_claim_guardrails" in request_payload
+
+
+def test_generate_campaign_extracts_complaints_as_claim_guardrails() -> None:
+    evidence = make_evidence()
+    review_id = evidence.review_insight.strengths[0].evidence_review_ids[0]
+    evidence.review_insight.complaints = [
+        ReviewTheme(
+            theme="Bluetooth instability",
+            summary="Customers report intermittent Bluetooth disconnections.",
+            evidence_review_ids=[review_id],
+        )
+    ]
+    draft = make_draft(evidence)
+    client = MagicMock()
+    client.responses.parse.side_effect = [
+        MagicMock(output_parsed=draft),
+        MagicMock(output_parsed=supported_verification(draft)),
+    ]
+
+    generate_campaign_draft(evidence, client, "test-model")
+
+    request = json.loads(client.responses.parse.call_args_list[0].kwargs["input"])
+    guardrails = request["customer_claim_guardrails"]
+    assert guardrails["documented_complaints"][0]["theme"] == (
+        "Bluetooth instability"
+    )
+    assert "Never positively qualify" in guardrails["claim_rule"]
 
 
 def test_validate_campaign_rejects_unknown_evidence() -> None:
@@ -301,3 +331,4 @@ def test_generate_campaign_retries_invalid_customer_copy() -> None:
     assert client.responses.parse.call_count == 3
     retry_input = client.responses.parse.call_args_list[1].kwargs["input"]
     assert "unsupported absolute claim" in retry_input
+    assert "Remove every contradicted assertion" in retry_input

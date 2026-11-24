@@ -16,4 +16,5 @@ web/node_modules/
 web/dist/
 
 *.log
+artifacts/
 
