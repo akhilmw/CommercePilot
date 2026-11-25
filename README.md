@@ -17,7 +17,7 @@ completed cycle with catalog, campaign, and price-change approvals.
 
 ## Demo video
 
-[![Play the CommercePilot demo on YouTube](https://i.ytimg.com/vi/d33EuCwaCGU/hqdefault.jpg)](https://youtu.be/d33EuCwaCGU)
+https://github.com/user-attachments/assets/be9ac87f-7d9d-408c-8483-42837b2619a9
 
 [Watch the CommercePilot demo on YouTube](https://youtu.be/d33EuCwaCGU)
 
