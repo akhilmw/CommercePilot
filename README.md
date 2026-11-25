@@ -15,6 +15,12 @@ completed cycle with catalog, campaign, and price-change approvals.
 ![React](https://img.shields.io/badge/UI-React-087EA4)
 ![Go MCP](https://img.shields.io/badge/Tools-Go%20%2B%20MCP-00ADD8)
 
+## Demo video
+
+[![Play the CommercePilot demo on YouTube](https://i.ytimg.com/vi/d33EuCwaCGU/hqdefault.jpg)](https://youtu.be/d33EuCwaCGU)
+
+[Watch the CommercePilot demo on YouTube](https://youtu.be/d33EuCwaCGU)
+
 ## What you can do
 
 - **Inspect a product.** Browse three demo products, their review counts, mapped competitors, price history, and previous runs.
