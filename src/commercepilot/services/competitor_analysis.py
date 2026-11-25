@@ -3,6 +3,7 @@ from uuid import UUID
 
 from openai import OpenAI
 
+from commercepilot.core.model_usage import parse_model_response
 from commercepilot.models.competitor import (
     CompetitorEvidenceSet,
     CompetitorInsight,
@@ -79,7 +80,8 @@ def analyze_competitor_evidence(
     if not evidence.price_changes:
         raise ValueError("No competitor prices are available for analysis.")
 
-    response = client.responses.parse(
+    response = parse_model_response(
+        client,
         model=model,
         instructions=COMPETITOR_ANALYSIS_INSTRUCTIONS,
         input=json.dumps(evidence.model_dump(mode="json")),

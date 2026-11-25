@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 from uuid import UUID
 
 from commercepilot.mcp.client import (
@@ -28,6 +28,8 @@ class CommercePilotState(TypedDict):
     review_insight: ReviewInsight | None
     competitor_insight: CompetitorInsight | None
     strategy: CommerceStrategy | None
+    campaign_requires_catalog_publish: NotRequired[bool]
+    campaign_skip_reason: NotRequired[str]
     catalog_draft: CatalogDraft | None
     catalog_draft_id: UUID | None
     catalog_comparison: CatalogComparison | None

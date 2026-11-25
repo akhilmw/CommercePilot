@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -7,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command, Interrupt
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from commercepilot.core.config import get_settings
@@ -20,6 +22,9 @@ from commercepilot.models.enums import (
     OrchestrationRunStatus,
 )
 from commercepilot.models.orchestration import HumanApprovalDecision
+from commercepilot.models.orchestration_api import RunTimelineEvent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -232,6 +237,20 @@ async def execute_orchestration_run(run_id: UUID) -> bool:
     if claimed_run is None:
         return False
 
+    def record_stage_event(event: RunTimelineEvent) -> None:
+        try:
+            with SessionLocal() as session:
+                # Review and competitor stages can complete concurrently.
+                run = session.get(OrchestrationRun, run_id, with_for_update=True)
+                if run is not None:
+                    run.stage_events = [
+                        *(run.stage_events or []),
+                        event.model_dump(mode="json"),
+                    ]
+                    session.commit()
+        except SQLAlchemyError:
+            logger.warning("Could not persist stage event for run %s", run_id)
+
     settings = get_settings()
     config = {
         "configurable": {
@@ -244,7 +263,10 @@ async def execute_orchestration_run(run_id: UUID) -> bool:
             serde=build_checkpoint_serializer(),
         ) as checkpointer:
             await checkpointer.setup()
-            graph = build_orchestrator_graph(checkpointer=checkpointer)
+            graph = build_orchestrator_graph(
+                checkpointer=checkpointer,
+                stage_observer=record_stage_event,
+            )
             graph_input: CommercePilotState | Command = (
                 Command(resume=claimed_run.resume_decision.model_dump(mode="json"))
                 if claimed_run.resume_decision is not None

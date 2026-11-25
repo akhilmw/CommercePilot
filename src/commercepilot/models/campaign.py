@@ -39,13 +39,7 @@ class CampaignEvidenceSet(BaseModel):
             )
         if self.competitor_insight.currency != product.currency:
             raise ValueError("Competitor insight currency does not match the product.")
-        if (
-            product.seo_title is None
-            or product.meta_description is None
-            or not product.feature_bullets
-            or not product.seo_keywords
-            or product.target_audience is None
-        ):
+        if not product.has_published_catalog:
             raise ValueError(
                 "Campaign generation requires a published product catalog."
             )

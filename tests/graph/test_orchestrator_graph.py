@@ -8,8 +8,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
+from commercepilot.graph import orchestrator_graph
 from commercepilot.graph.checkpoint import build_orchestrator_checkpointer
 from commercepilot.graph.orchestrator_graph import (
+    APPLY_APPROVAL_POLICY_NODE,
+    EXECUTE_CATALOG_PUBLISH_NODE,
     RUN_CAMPAIGN_AGENT_NODE,
     RUN_CATALOG_AGENT_NODE,
     build_catalog_comparison_node,
@@ -20,6 +23,8 @@ from commercepilot.graph.orchestrator_graph import (
     process_catalog_approval_node,
     request_campaign_approval_node,
     request_catalog_approval_node,
+    route_after_catalog_execution,
+    route_after_processing_catalog_approval,
     route_after_synthesis,
 )
 from commercepilot.graph.orchestrator_state import CommercePilotState
@@ -100,7 +105,8 @@ def test_force_catalog_routes_to_catalog_agent() -> None:
     assert route_after_synthesis(state) == RUN_CATALOG_AGENT_NODE
 
 
-def test_force_campaign_routes_to_campaign_agent() -> None:
+@pytest.mark.parametrize("catalog_published", [True, False])
+def test_campaign_routing_checks_catalog_readiness(catalog_published: bool) -> None:
     state = initial_state()
     state["force_campaign_update"] = True
     state["strategy"] = CommerceStrategy(
@@ -121,7 +127,38 @@ def test_force_campaign_routes_to_campaign_agent() -> None:
         confidence=0.8,
     )
 
-    assert route_after_synthesis(state) == RUN_CAMPAIGN_AGENT_NODE
+    state["review_insight"] = MagicMock()
+    state["competitor_insight"] = MagicMock()
+    with (
+        patch.object(orchestrator_graph, "get_settings"),
+        patch.object(orchestrator_graph, "OpenAI"),
+        patch.object(
+            orchestrator_graph, "synthesize_strategy", return_value=state["strategy"]
+        ),
+        patch.object(orchestrator_graph, "SessionLocal"),
+        patch.object(orchestrator_graph, "ProductRead") as product_read,
+    ):
+        product = product_read.model_validate.return_value
+        product.has_published_catalog = catalog_published
+        update = orchestrator_graph.synthesize_strategy_node(state)
+    state["campaign_requires_catalog_publish"] = update[
+        "campaign_requires_catalog_publish"
+    ]
+
+    if catalog_published:
+        assert route_after_synthesis(state) == RUN_CAMPAIGN_AGENT_NODE
+        assert route_after_processing_catalog_approval(state) == RUN_CAMPAIGN_AGENT_NODE
+    else:
+        assert route_after_synthesis(state) == RUN_CATALOG_AGENT_NODE
+        assert (
+            route_after_processing_catalog_approval(state) == APPLY_APPROVAL_POLICY_NODE
+        )
+        state["catalog_publish_action_id"] = uuid4()
+        assert (
+            route_after_processing_catalog_approval(state)
+            == EXECUTE_CATALOG_PUBLISH_NODE
+        )
+        assert route_after_catalog_execution(state) == RUN_CAMPAIGN_AGENT_NODE
 
 
 @patch("commercepilot.graph.orchestrator_graph.synthesize_strategy_node")
@@ -163,7 +200,17 @@ def test_orchestrator_combines_agents_and_applies_policy(
     }
     synthesize.return_value = {"strategy": strategy, "error": None}
 
-    result = build_orchestrator_graph().invoke(initial_state())
+    observer = MagicMock()
+    result = build_orchestrator_graph(stage_observer=observer).invoke(initial_state())
+
+    events = [call.args[0] for call in observer.call_args_list]
+    assert {event.title for event in events} == {
+        "Review analysis",
+        "Competitor analysis",
+        "Strategy synthesis",
+    }
+    assert all(event.status == "completed" for event in events)
+    assert all(event.details["duration_ms"] >= 0 for event in events)
 
     assert result["review_insight"] is review_insight
     assert result["competitor_insight"] is competitor_insight

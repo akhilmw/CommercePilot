@@ -3,10 +3,11 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from openai import OpenAI, OpenAIError
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from commercepilot.core.config import get_settings
-from commercepilot.db.models import ApprovedAction
+from commercepilot.db.models import ApprovedAction, Product
 from commercepilot.db.session import SessionLocal
 from commercepilot.graph.campaign_graph import build_campaign_graph
 from commercepilot.graph.campaign_state import CampaignAgentState
@@ -17,6 +18,7 @@ from commercepilot.graph.competitor_state import CompetitorAgentState
 from commercepilot.graph.orchestrator_state import CommercePilotState
 from commercepilot.graph.review_graph import build_review_graph
 from commercepilot.graph.review_state import ReviewAgentState
+from commercepilot.graph.stage_observability import StageObserver, observe_stage
 from commercepilot.mcp.client import (
     CommercePilotMCPClient,
     LaunchCampaignRequest,
@@ -30,6 +32,7 @@ from commercepilot.models.campaign import CampaignLaunchPreview
 from commercepilot.models.catalog import CatalogComparison
 from commercepilot.models.enums import ActionType
 from commercepilot.models.orchestration import HumanApprovalDecision
+from commercepilot.models.product import ProductRead
 from commercepilot.services.approval_policy import apply_approval_policy
 from commercepilot.services.approved_actions import persist_approved_price_actions
 from commercepilot.services.campaign_approval import process_campaign_approval
@@ -121,10 +124,26 @@ def synthesize_strategy_node(state: CommercePilotState) -> dict[str, Any]:
             client=OpenAI(api_key=settings.openai_api_key),
             model=settings.openai_model,
         )
-    except (OpenAIError, ValueError) as error:
+        next_state: CommercePilotState = {**state, "strategy": strategy}
+        requires_catalog_publish = False
+        if _should_run_campaign(next_state):
+            with SessionLocal() as session:
+                product = session.scalar(
+                    select(Product).where(Product.sku == state["product_sku"])
+                )
+                if product is None:
+                    raise ValueError(f"Unknown product SKU: {state['product_sku']}")
+                requires_catalog_publish = not ProductRead.model_validate(
+                    product
+                ).has_published_catalog
+    except (OpenAIError, SQLAlchemyError, ValueError) as error:
         return {"strategy": None, "error": str(error)}
 
-    return {"strategy": strategy, "error": None}
+    return {
+        "strategy": strategy,
+        "campaign_requires_catalog_publish": requires_catalog_publish,
+        "error": None,
+    }
 
 
 def run_catalog_agent_node(state: CommercePilotState) -> dict[str, Any]:
@@ -283,11 +302,19 @@ def process_catalog_approval_node(
             "error": str(error),
         }
 
-    return {
+    update = {
         "catalog_publish_action_id": action_id,
         "catalog_error": None,
         "error": None,
     }
+    if not decision.approved and state.get("campaign_requires_catalog_publish"):
+        return {
+            **update,
+            "campaign_skip_reason": (
+                "Campaign skipped because catalog publishing was declined."
+            ),
+        }
+    return update
 
 
 async def execute_catalog_publish_node(
@@ -673,6 +700,8 @@ def route_after_synthesis(state: CommercePilotState) -> str:
     ):
         return RUN_CATALOG_AGENT_NODE
     if _should_run_campaign(state):
+        if state.get("campaign_requires_catalog_publish"):
+            return RUN_CATALOG_AGENT_NODE
         return RUN_CAMPAIGN_AGENT_NODE
     return APPLY_APPROVAL_POLICY_NODE
 
@@ -719,7 +748,9 @@ def route_after_processing_catalog_approval(
         return END
     if state["catalog_publish_action_id"] is not None:
         return EXECUTE_CATALOG_PUBLISH_NODE
-    if _should_run_campaign(state):
+    if _should_run_campaign(state) and not state.get(
+        "campaign_requires_catalog_publish"
+    ):
         return RUN_CAMPAIGN_AGENT_NODE
     return APPLY_APPROVAL_POLICY_NODE
 
@@ -794,13 +825,20 @@ def route_after_persisting_actions(state: CommercePilotState) -> str:
     return EXECUTE_APPROVED_ACTIONS_NODE
 
 
-def build_orchestrator_graph(checkpointer: Any | None = None) -> Any:
+def build_orchestrator_graph(
+    checkpointer: Any | None = None,
+    *,
+    stage_observer: StageObserver | None = None,
+) -> Any:
     graph = StateGraph(CommercePilotState)
-    graph.add_node(RUN_REVIEW_AGENT_NODE, run_review_agent_node)
-    graph.add_node(RUN_COMPETITOR_AGENT_NODE, run_competitor_agent_node)
-    graph.add_node(SYNTHESIZE_STRATEGY_NODE, synthesize_strategy_node)
-    graph.add_node(RUN_CATALOG_AGENT_NODE, run_catalog_agent_node)
-    graph.add_node(RUN_CAMPAIGN_AGENT_NODE, run_campaign_agent_node)
+    for name, node, title in (
+        (RUN_REVIEW_AGENT_NODE, run_review_agent_node, "Review analysis"),
+        (RUN_COMPETITOR_AGENT_NODE, run_competitor_agent_node, "Competitor analysis"),
+        (SYNTHESIZE_STRATEGY_NODE, synthesize_strategy_node, "Strategy synthesis"),
+        (RUN_CATALOG_AGENT_NODE, run_catalog_agent_node, "Catalog generation"),
+        (RUN_CAMPAIGN_AGENT_NODE, run_campaign_agent_node, "Campaign generation"),
+    ):
+        graph.add_node(name, observe_stage(node, title, stage_observer))
     graph.add_node(
         PERSIST_CATALOG_DRAFT_NODE,
         persist_catalog_draft_node,

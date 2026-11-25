@@ -103,6 +103,9 @@ def build_run_timeline(run: OrchestrationRun) -> RunTimelineRead:
             )
         )
 
+    events.extend(
+        RunTimelineEvent.model_validate(event) for event in (run.stage_events or [])
+    )
     events.sort(key=lambda event: event.occurred_at or run.created_at)
     return RunTimelineRead(
         run_id=run.id,

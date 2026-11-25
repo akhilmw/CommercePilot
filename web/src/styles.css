@@ -138,6 +138,8 @@ td > small, .product-cell small { display: block; margin-top: 4px; color: var(--
 .completion-panel { display: flex; align-items: center; gap: 14px; padding: 20px; }
 .completion-panel p { margin: 5px 0 0; color: var(--muted); font-size: 0.84rem; }
 .completion-icon { display: grid; width: 42px; height: 42px; place-items: center; color: var(--accent); background: var(--accent-soft); border-radius: 50%; }
+.completion-failed .completion-icon { color: var(--danger); background: var(--danger-soft); }
+.completion-failed p { overflow-wrap: anywhere; white-space: pre-wrap; }
 
 .approval-panel { padding-bottom: 20px; border-color: #ead7ad; }
 .diff-stack { display: grid; gap: 12px; padding: 18px 20px; }

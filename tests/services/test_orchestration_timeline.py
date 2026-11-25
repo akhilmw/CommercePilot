@@ -53,3 +53,17 @@ def test_build_completed_run_timeline_orders_approval_lifecycle() -> None:
     ]
     assert timeline.events[3].status == "approved"
     assert timeline.events[3].details["reviewer"] == "akhil"
+
+    run.stage_events = [
+        {
+            "id": "stage:catalog",
+            "event_type": "agent_stage",
+            "title": "Catalog generation",
+            "status": "completed",
+            "occurred_at": (created_at + timedelta(minutes=2)).isoformat(),
+            "details": {"duration_ms": 1200},
+        }
+    ]
+    timeline = build_run_timeline(run)
+    assert timeline.events[2].id == "stage:catalog"
+    assert timeline.events[2].details["duration_ms"] == 1200

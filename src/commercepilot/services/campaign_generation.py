@@ -5,6 +5,7 @@ from uuid import UUID
 
 from openai import OpenAI
 
+from commercepilot.core.model_usage import parse_model_response
 from commercepilot.models.campaign import (
     CampaignClaim,
     CampaignDraft,
@@ -323,7 +324,8 @@ def verify_campaign_draft_semantics(
     model: str,
 ) -> CampaignSemanticVerification:
     claims = _campaign_claims(draft)
-    response = client.responses.parse(
+    response = parse_model_response(
+        client,
         model=model,
         instructions=CAMPAIGN_VERIFICATION_INSTRUCTIONS,
         input=json.dumps(
@@ -369,7 +371,8 @@ def generate_campaign_draft(
     last_error: ValueError | None = None
 
     for attempt in range(MAX_CAMPAIGN_GENERATION_ATTEMPTS):
-        response = client.responses.parse(
+        response = parse_model_response(
+            client,
             model=model,
             instructions=CAMPAIGN_GENERATION_INSTRUCTIONS,
             input=json.dumps(request),

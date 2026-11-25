@@ -9,6 +9,7 @@ from uuid import UUID
 from openai import OpenAI
 from pydantic import ValidationError
 
+from commercepilot.core.model_usage import parse_model_response
 from commercepilot.models.catalog import (
     CatalogClaim,
     CatalogDraft,
@@ -421,7 +422,8 @@ def verify_catalog_draft_semantics(
         "claims": [claim.model_dump(mode="json") for claim in claims],
         "evidence": evidence.model_dump(mode="json"),
     }
-    response = client.responses.parse(
+    response = parse_model_response(
+        client,
         model=model,
         instructions=CATALOG_VERIFICATION_INSTRUCTIONS,
         input=json.dumps(request),
@@ -460,7 +462,8 @@ def generate_catalog_draft(
     for attempt in range(MAX_CATALOG_GENERATION_ATTEMPTS):
         draft: CatalogDraft | None = None
         try:
-            response = client.responses.parse(
+            response = parse_model_response(
+                client,
                 model=model,
                 instructions=CATALOG_GENERATION_INSTRUCTIONS,
                 input=json.dumps(request),

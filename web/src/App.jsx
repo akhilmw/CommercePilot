@@ -137,6 +137,23 @@ function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, sea
   );
 }
 
+function RunSummary({ run }) {
+  const summaries = {
+    completed: ["Cycle completed", run.result?.campaign_skip_reason || "The audit trail is complete.", "check"],
+    failed: ["Cycle failed", run.error || "The worker did not report a failure reason.", "close"],
+    awaiting_approval: ["Awaiting approval", "The worker is paused for a decision.", "clock"],
+    pending: ["Cycle queued", "Waiting for the worker to pick up this run.", "clock"],
+    running: ["Cycle running", "The worker is processing this run. This view refreshes automatically.", "clock"],
+  };
+  const [title, description, icon] = summaries[run.status] ?? ["Cycle status", run.status, "clock"];
+  return (
+    <section className={`panel completion-panel completion-${run.status}`}>
+      <span className="completion-icon"><Icon name={icon} /></span>
+      <div><h2>{title}</h2><p>{description}</p></div>
+    </section>
+  );
+}
+
 function RunWorkspace({ product, runs, selectedRun, timeline, approvals, onSelectRun, onDecision, comment, setComment }) {
   const runApproval = approvals.find((approval) => approval.run_id === selectedRun?.id);
   return (
@@ -164,14 +181,28 @@ function RunWorkspace({ product, runs, selectedRun, timeline, approvals, onSelec
                   {(timeline?.events ?? []).map((event, index) => (
                     <div className={`timeline-event event-${event.status}`} key={event.id}>
                       <div className="timeline-track"><span>{event.status === "approved" || event.status === "completed" ? "✓" : index + 1}</span></div>
-                      <div><strong>{event.title}</strong><p>{event.details?.comment || event.event_type.replaceAll("_", " ")}</p></div><time>{formatDate(event.occurred_at)}</time>
+                      <div>
+                        <strong>{event.title}</strong>
+                        <p>{event.event_type === "agent_stage"
+                          ? `${event.status} · ${(event.details.duration_ms / 1000).toFixed(1)} s`
+                          : event.details?.comment || event.event_type.replaceAll("_", " ")}</p>
+                        {event.details?.total_tokens != null && (
+                          <p>
+                            {event.details.input_tokens.toLocaleString()} input ·{" "}
+                            {event.details.output_tokens.toLocaleString()} output tokens ·{" "}
+                            {event.details.estimated_cost_usd == null
+                              ? "Cost unavailable"
+                              : `Est. $${event.details.estimated_cost_usd.toFixed(6)}`}
+                          </p>
+                        )}
+                      </div><time>{formatDate(event.occurred_at)}</time>
                     </div>
                   ))}
                 </div>
               </section>
 
               {runApproval ? <ApprovalPanel approval={runApproval} comment={comment} setComment={setComment} onDecision={onDecision} /> : (
-                <section className="panel completion-panel"><span className="completion-icon"><Icon name="check" /></span><div><h2>{selectedRun.status === "completed" ? "Cycle completed" : "No decision required"}</h2><p>{selectedRun.status === "completed" ? "All approved actions finished and the audit trail is complete." : "The worker is processing this run. This view refreshes automatically."}</p></div></section>
+                <RunSummary run={selectedRun} />
               )}
             </>
           ) : <section className="panel"><EmptyState title="Choose a run" description="Select a run from the history to inspect its lifecycle." /></section>}

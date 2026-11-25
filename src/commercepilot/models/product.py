@@ -72,3 +72,13 @@ class ProductRead(ProductBase):
     target_audience: str | None = Field(default=None, max_length=300)
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def has_published_catalog(self) -> bool:
+        return (
+            self.seo_title is not None
+            and self.meta_description is not None
+            and bool(self.feature_bullets)
+            and bool(self.seo_keywords)
+            and self.target_audience is not None
+        )

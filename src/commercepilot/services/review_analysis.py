@@ -3,6 +3,7 @@ from uuid import UUID
 
 from openai import OpenAI
 
+from commercepilot.core.model_usage import parse_model_response
 from commercepilot.models.review import ReviewEvidenceSet, ReviewInsight
 
 REVIEW_ANALYSIS_INSTRUCTIONS = """
@@ -57,7 +58,8 @@ def analyze_review_evidence(
     last_error: ValueError | None = None
 
     for attempt in range(MAX_REVIEW_ANALYSIS_ATTEMPTS):
-        response = client.responses.parse(
+        response = parse_model_response(
+            client,
             model=model,
             instructions=REVIEW_ANALYSIS_INSTRUCTIONS,
             input=json.dumps(request),

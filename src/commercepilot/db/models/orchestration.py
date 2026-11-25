@@ -64,6 +64,7 @@ class OrchestrationRun(Base):
         server_default="false",
     )
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    stage_events: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -3,6 +3,7 @@ from uuid import UUID
 
 from openai import OpenAI
 
+from commercepilot.core.model_usage import parse_model_response
 from commercepilot.models.competitor import CompetitorInsight
 from commercepilot.models.enums import ActionType, SourceAgent
 from commercepilot.models.orchestration import CommerceStrategy
@@ -127,7 +128,8 @@ def synthesize_strategy(
     last_error: ValueError | None = None
 
     for attempt in range(MAX_STRATEGY_SYNTHESIS_ATTEMPTS):
-        response = client.responses.parse(
+        response = parse_model_response(
+            client,
             model=model,
             instructions=STRATEGY_SYNTHESIS_INSTRUCTIONS,
             input=json.dumps(request),
