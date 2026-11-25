@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from commercepilot.db.models import ApprovalRequest, OrchestrationRun
 from commercepilot.models.enums import (
+    ActionType,
     ApprovalRequestStatus,
     OrchestrationRunStatus,
 )
@@ -24,7 +25,19 @@ APPROVAL_TITLES = {
 }
 
 
-def _approval_title(approval_type: str) -> str:
+def _approval_title(approval: ApprovalRequest) -> str:
+    approval_type = approval.approval_type
+    actions = approval.payload.get("actions")
+    if (
+        approval_type == "human_approval_required"
+        and isinstance(actions, list)
+        and any(
+            isinstance(action, dict)
+            and action.get("action_type") == ActionType.CHANGE_PRICE
+            for action in actions
+        )
+    ):
+        return "Price change approval"
     return APPROVAL_TITLES.get(
         approval_type,
         approval_type.replace("_", " ").title(),
@@ -53,7 +66,7 @@ def build_run_timeline(run: OrchestrationRun) -> RunTimelineRead:
         )
 
     for approval in sorted(run.approval_requests, key=lambda item: item.created_at):
-        title = _approval_title(approval.approval_type)
+        title = _approval_title(approval)
         events.append(
             RunTimelineEvent(
                 id=f"approval:{approval.id}:requested",

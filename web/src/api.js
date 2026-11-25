@@ -26,10 +26,12 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  getCapabilities: () => request("/api/capabilities"),
   listProducts: () => request("/api/products"),
   listProductRuns: (sku, limit = 20) =>
     request(`/api/products/${sku}/runs?limit=${limit}`),
   getTimeline: (runId) => request(`/api/runs/${runId}/timeline`),
+  getRunApprovals: (runId) => request(`/api/runs/${runId}/approvals`),
   listApprovals: (status = "pending") =>
     request(`/api/approvals?status=${status}`),
   getMarket: (sku) => request(`/api/products/${sku}/market`),

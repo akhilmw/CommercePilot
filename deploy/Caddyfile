@@ -1,0 +1,3 @@
+{$COMMERCEPILOT_PUBLIC_HOST} {
+	reverse_proxy demo-web:80
+}

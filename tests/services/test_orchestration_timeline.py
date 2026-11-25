@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
+
 from commercepilot.db.models import ApprovalRequest, OrchestrationRun, Product
 from commercepilot.models.enums import (
     ApprovalRequestStatus,
@@ -9,7 +11,23 @@ from commercepilot.models.enums import (
 from commercepilot.services.orchestration_timeline import build_run_timeline
 
 
-def test_build_completed_run_timeline_orders_approval_lifecycle() -> None:
+@pytest.mark.parametrize(
+    ("approval_type", "payload", "title"),
+    [
+        ("catalog_publish_approval_required", {}, "Catalog update approval"),
+        (
+            "human_approval_required",
+            {"actions": [{"action_type": "change_price"}]},
+            "Price change approval",
+        ),
+        ("human_approval_required", {}, "Human approval"),
+    ],
+)
+def test_build_completed_run_timeline_orders_approval_lifecycle(
+    approval_type: str,
+    payload: dict[str, object],
+    title: str,
+) -> None:
     created_at = datetime.now(UTC) - timedelta(minutes=10)
     product = Product(
         id=uuid4(),
@@ -32,8 +50,8 @@ def test_build_completed_run_timeline_orders_approval_lifecycle() -> None:
         id=uuid4(),
         run=run,
         interrupt_id="catalog-approval",
-        approval_type="catalog_publish_approval_required",
-        payload={},
+        approval_type=approval_type,
+        payload=payload,
         status=ApprovalRequestStatus.APPROVED,
         reviewer="akhil",
         comment="Verified.",
@@ -52,6 +70,8 @@ def test_build_completed_run_timeline_orders_approval_lifecycle() -> None:
         "run_completed",
     ]
     assert timeline.events[3].status == "approved"
+    assert timeline.events[2].title == f"{title} requested"
+    assert timeline.events[3].title == f"{title} approved"
     assert timeline.events[3].details["reviewer"] == "akhil"
 
     run.stage_events = [

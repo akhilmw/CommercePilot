@@ -1,0 +1,78 @@
+services:
+  db:
+    container_name: !reset null
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a dedicated database password in .env}
+    networks: [default, demo-db]
+
+  mcp:
+    ports: !reset []
+
+  api:
+    ports: !reset []
+    environment:
+      COMMERCEPILOT_READ_ONLY_DEMO: "false"
+
+  web:
+    ports: !override
+      - "127.0.0.1:${COMMERCEPILOT_OPERATOR_PORT:-5173}:80"
+
+  demo-api:
+    build:
+      context: .
+    command: ["uvicorn", "commercepilot.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      COMMERCEPILOT_READ_ONLY_DEMO: "true"
+      COMMERCEPILOT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commercepilot}:${POSTGRES_PASSWORD:?Set a dedicated database password in .env}@db:5432/${POSTGRES_DB:-commercepilot}
+      PGOPTIONS: "-c default_transaction_read_only=on"
+    networks: [demo-db, demo-edge]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  demo-web:
+    build:
+      context: ./web
+    environment:
+      COMMERCEPILOT_API_UPSTREAM: demo-api:8000
+    networks: [demo-edge]
+    ports:
+      - "127.0.0.1:${COMMERCEPILOT_DEMO_PREVIEW_PORT:-8088}:80"
+    depends_on:
+      demo-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  edge:
+    image: caddy:2-alpine
+    profiles: ["public-tls"]
+    environment:
+      COMMERCEPILOT_PUBLIC_HOST: ${COMMERCEPILOT_PUBLIC_HOST:-localhost}
+    networks: [demo-edge]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      demo-web:
+        condition: service_started
+    restart: unless-stopped
+
+networks:
+  demo-db:
+    internal: true
+  demo-edge:
+
+volumes:
+  caddy_data:
+  caddy_config:

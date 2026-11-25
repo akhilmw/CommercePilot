@@ -66,7 +66,7 @@ function Stat({ label, value, detail, tone = "default" }) {
   return <article className={`stat-card stat-${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, search, setSearch }) {
+function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, search, setSearch, readOnly }) {
   const filtered = products.filter((product) =>
     `${product.name} ${product.sku} ${product.category}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -80,7 +80,7 @@ function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, sea
         <div>
           <p className="eyebrow">Portfolio intelligence</p>
           <h1>Products</h1>
-          <p className="page-subtitle">Choose a product to inspect signals or start an agent run.</p>
+          <p className="page-subtitle">{readOnly ? "Explore product signals and replay saved runs." : "Choose a product to inspect signals or start an agent run."}</p>
         </div>
         <label className="search-box">
           <span className="sr-only">Search products</span>
@@ -126,8 +126,10 @@ function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, sea
                 <div><dt>Pending approvals</dt><dd>{selected.pending_approval_count}</dd></div>
                 <div><dt>Latest run</dt><dd>{selected.latest_run ? shortId(selected.latest_run.id) : "None"}</dd></div>
               </dl>
-              <div className="detail-note"><strong>Independent workflow</strong><p>A new cycle analyzes only this SKU and preserves every decision in its own run history.</p></div>
-              <button className="button primary full" onClick={() => onRun(selected)}><Icon name="play" />Run intelligence cycle</button>
+              {!readOnly && <>
+                <div className="detail-note"><strong>Independent workflow</strong><p>A new cycle analyzes only this SKU and preserves every decision in its own run history.</p></div>
+                <button className="button primary full" onClick={() => onRun(selected)}><Icon name="play" />Run intelligence cycle</button>
+              </>}
               <button className="button secondary full" onClick={onOpenRuns}><Icon name="clock" />View run history</button>
             </>
           ) : <EmptyState title="Select a product" description="Choose a portfolio row to inspect its intelligence state." />}
@@ -154,12 +156,16 @@ function RunSummary({ run }) {
   );
 }
 
-function RunWorkspace({ product, runs, selectedRun, timeline, approvals, onSelectRun, onDecision, comment, setComment }) {
+function RunWorkspace({ product, runs, selectedRun, timeline, approvals, approvalHistory, readOnly, onSelectRun, onDecision, comment, setComment }) {
   const runApproval = approvals.find((approval) => approval.run_id === selectedRun?.id);
+  const savedReviews = approvalHistory.filter((approval) =>
+    approval.run_id === selectedRun?.id && approval.status !== "pending"
+    && (approval.payload?.comparison || approval.payload?.preview || priceActions(approval).length > 0),
+  );
   return (
     <>
       <header className="page-heading">
-        <div><p className="eyebrow">Governed orchestration</p><h1>Agent runs</h1><p className="page-subtitle">Inspect LangGraph execution and resolve human checkpoints.</p></div>
+        <div><p className="eyebrow">Governed orchestration</p><h1>Agent runs</h1><p className="page-subtitle">{readOnly ? "Inspect saved timelines and approval decisions." : "Inspect LangGraph execution and resolve human checkpoints."}</p></div>
         {selectedRun && <StatusBadge status={selectedRun.status} />}
       </header>
       <div className="workspace-layout">
@@ -201,9 +207,12 @@ function RunWorkspace({ product, runs, selectedRun, timeline, approvals, onSelec
                 </div>
               </section>
 
-              {runApproval ? <ApprovalPanel approval={runApproval} comment={comment} setComment={setComment} onDecision={onDecision} /> : (
+              {!readOnly && runApproval ? <ApprovalPanel approval={runApproval} comment={comment} setComment={setComment} onDecision={onDecision} /> : (
                 <RunSummary run={selectedRun} />
               )}
+              {savedReviews.map((approval) => (
+                <ApprovalPanel key={approval.id} approval={approval} readOnly />
+              ))}
             </>
           ) : <section className="panel"><EmptyState title="Choose a run" description="Select a run from the history to inspect its lifecycle." /></section>}
         </section>
@@ -212,16 +221,45 @@ function RunWorkspace({ product, runs, selectedRun, timeline, approvals, onSelec
   );
 }
 
-function ApprovalPanel({ approval, comment, setComment, onDecision }) {
+function priceActions(approval) {
+  const actions = approval.payload?.actions;
+  return Array.isArray(actions)
+    ? actions.filter((action) => action?.action_type === "change_price" && action.price_change)
+    : [];
+}
+
+function ApprovalPanel({ approval, comment, setComment, onDecision, readOnly = false }) {
   const comparison = approval.payload?.comparison;
   const preview = approval.payload?.preview;
+  const prices = priceActions(approval);
+  const title = {
+    catalog_publish_approval_required: "Catalog update approval",
+    campaign_launch_approval_required: "Campaign launch approval",
+    human_approval_required: prices.length ? "Price change approval" : "Human approval",
+  }[approval.approval_type] ?? approval.approval_type.replaceAll("_", " ");
   return (
     <section className="panel approval-panel">
-      <div className="panel-heading"><div><p className="eyebrow">Human checkpoint</p><h2>{approval.approval_type.replaceAll("_", " ")}</h2></div><StatusBadge status="awaiting_approval" /></div>
+      <div className="panel-heading"><div><p className="eyebrow">Human checkpoint</p><h2>{title}</h2></div><StatusBadge status={readOnly ? approval.status : "awaiting_approval"} /></div>
       {comparison && <div className="diff-stack">{comparison.fields.filter((field) => field.changed).map((field) => <div className="diff-card" key={field.field}><strong>{field.label}</strong><div className="diff-grid"><div><span>Current</span><p>{renderValue(field.current_value)}</p></div><div className="proposed"><span>Proposed</span><p>{renderValue(field.proposed_value)}</p></div></div></div>)}</div>}
       {preview && <div className="campaign-preview"><h3>{preview.name}</h3><p>{preview.objective}</p><div className="channel-grid">{preview.assets.map((asset) => <article key={asset.channel}><span>{asset.channel.replaceAll("_", " ")}</span><strong>{asset.headline}</strong><p>{asset.body}</p></article>)}</div></div>}
-      <label className="comment-field"><span>Approval comment</span><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows="3" /></label>
-      <div className="approval-actions"><button className="button danger" onClick={() => onDecision(approval, false)}><Icon name="close" />Reject</button><button className="button primary" onClick={() => onDecision(approval, true)}><Icon name="check" />Approve & resume</button></div>
+      {prices.length > 0 && (
+        <div className="diff-stack">
+          {prices.map(({ price_change: price, title: actionTitle, rationale }, index) => (
+            <div className="diff-card" key={`${price.sku}-${index}`}>
+              <strong>{price.sku} · {actionTitle}</strong>
+              <div className="diff-grid">
+                <div><span>Price before change</span><p>{formatMoney(price.expected_current_price, price.currency)}</p></div>
+                <div className="proposed"><span>Proposed price</span><p>{formatMoney(price.new_price, price.currency)}</p></div>
+              </div>
+              {rationale && <p>{rationale}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+      {!readOnly && <>
+        <label className="comment-field"><span>Approval comment</span><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows="3" /></label>
+        <div className="approval-actions"><button className="button danger" onClick={() => onDecision(approval, false)}><Icon name="close" />Reject</button><button className="button primary" onClick={() => onDecision(approval, true)}><Icon name="check" />Approve & resume</button></div>
+      </>}
     </section>
   );
 }
@@ -232,7 +270,7 @@ function renderValue(value) {
   return String(value);
 }
 
-function MarketSimulator({ product, market, onSubmit, submitting }) {
+function MarketSimulator({ product, market, onSubmit, submitting, readOnly }) {
   const [competitorSku, setCompetitorSku] = useState("");
   const [price, setPrice] = useState("");
   const [promotion, setPromotion] = useState("");
@@ -250,8 +288,8 @@ function MarketSimulator({ product, market, onSubmit, submitting }) {
   };
   return (
     <>
-      <header className="page-heading"><div><p className="eyebrow">Controlled demo environment</p><h1>Market simulator</h1><p className="page-subtitle">Publish a competitor observation and see how the next agent cycle reacts.</p></div><StatusBadge status={product?.status} /></header>
-      <div className="market-layout">
+      <header className="page-heading"><div><p className="eyebrow">Controlled demo environment</p><h1>{readOnly ? "Market signals" : "Market simulator"}</h1><p className="page-subtitle">{readOnly ? "Explore saved competitor price observations." : "Publish a competitor observation and see how the next agent cycle reacts."}</p></div><StatusBadge status={product?.status} /></header>
+      <div className={readOnly ? undefined : "market-layout"}>
         <section className="panel market-board">
           <div className="panel-heading"><div><h2>Competitive price position</h2><p>{product?.name} is currently {formatMoney(market?.our_price, market?.currency)}</p></div><span className="record-count">{market?.competitors?.length ?? 0} tracked</span></div>
           <div className="market-cards">
@@ -266,7 +304,7 @@ function MarketSimulator({ product, market, onSubmit, submitting }) {
             ))}
           </div>
         </section>
-        <aside className="panel simulator-form-panel">
+        {!readOnly && <aside className="panel simulator-form-panel">
           <div className="panel-heading"><div><h2>New market observation</h2><p>Creates an immutable snapshot</p></div></div>
           <form onSubmit={submit} className="simulator-form">
             <label><span>Competitor product</span><select value={competitorSku} onChange={(event) => { setCompetitorSku(event.target.value); const next = market.competitors.find((item) => item.competitor_sku === event.target.value); if (next) setPrice(next.current_price); }}>{(market?.competitors ?? []).map((item) => <option key={item.competitor_sku} value={item.competitor_sku}>{item.competitor_name} · {item.competitor_product_name}</option>)}</select></label>
@@ -276,7 +314,7 @@ function MarketSimulator({ product, market, onSubmit, submitting }) {
             <button className="button primary full" disabled={submitting || !competitorSku}>{submitting ? "Publishing snapshot…" : "Publish market snapshot"}</button>
           </form>
           <p className="form-footnote">This changes competitor evidence only. Start a new intelligence cycle afterward to invoke the agents.</p>
-        </aside>
+        </aside>}
       </div>
     </>
   );
@@ -290,6 +328,8 @@ export default function App() {
   const [selectedRunId, setSelectedRunId] = useState(null);
   const [timeline, setTimeline] = useState(null);
   const [approvals, setApprovals] = useState([]);
+  const [approvalHistory, setApprovalHistory] = useState([]);
+  const [readOnly, setReadOnly] = useState(true);
   const [market, setMarket] = useState(null);
   const [search, setSearch] = useState("");
   const [comment, setComment] = useState("Evidence and proposed action reviewed.");
@@ -322,7 +362,8 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await loadPortfolio();
+      const [data, capabilities] = await Promise.all([loadPortfolio(), api.getCapabilities()]);
+      setReadOnly(capabilities.read_only_demo);
       const sku = selectedSku ?? data[0]?.sku;
       if (sku) await loadProductContext(sku);
     } catch (error) {
@@ -335,8 +376,17 @@ export default function App() {
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { if (selectedSku) loadProductContext(selectedSku).catch((error) => setNotice({ tone: "error", text: error.message })); }, [selectedSku, loadProductContext]);
   useEffect(() => {
-    if (!selectedRun?.id) { setTimeline(null); return; }
-    api.getTimeline(selectedRun.id).then(setTimeline).catch((error) => setNotice({ tone: "error", text: error.message }));
+    if (!selectedRun?.id) { setTimeline(null); setApprovalHistory([]); return; }
+    let active = true;
+    Promise.all([
+      api.getTimeline(selectedRun.id),
+      api.getRunApprovals(selectedRun.id),
+    ]).then(([nextTimeline, history]) => {
+      if (active) { setTimeline(nextTimeline); setApprovalHistory(history); }
+    }).catch((error) => {
+      if (active) setNotice({ tone: "error", text: error.message });
+    });
+    return () => { active = false; };
   }, [selectedRun?.id, selectedRun?.updated_at]);
   useEffect(() => {
     if (!selectedRun || !ACTIVE_RUNS.has(selectedRun.status)) return undefined;
@@ -376,20 +426,20 @@ export default function App() {
   };
 
   const page = useMemo(() => {
-    if (view === "workspace") return <RunWorkspace product={selectedProduct} runs={runs} selectedRun={selectedRun} timeline={timeline} approvals={approvals} onSelectRun={(run) => setSelectedRunId(run.id)} onDecision={decide} comment={comment} setComment={setComment} />;
-    if (view === "market") return <MarketSimulator product={selectedProduct} market={market} onSubmit={simulate} submitting={busy} />;
-    return <ProductPortfolio products={products} selected={selectedProduct} onSelect={(product) => setSelectedSku(product.sku)} onRun={runCycle} onOpenRuns={() => setView("workspace")} search={search} setSearch={setSearch} />;
-  }, [view, products, selectedProduct, runs, selectedRun, timeline, approvals, comment, market, busy, search]);
+    if (view === "workspace") return <RunWorkspace product={selectedProduct} runs={runs} selectedRun={selectedRun} timeline={timeline?.run_id === selectedRun?.id ? timeline : null} approvals={approvals} approvalHistory={approvalHistory} readOnly={readOnly} onSelectRun={(run) => setSelectedRunId(run.id)} onDecision={decide} comment={comment} setComment={setComment} />;
+    if (view === "market") return <MarketSimulator product={selectedProduct} market={market} onSubmit={simulate} submitting={busy} readOnly={readOnly} />;
+    return <ProductPortfolio products={products} selected={selectedProduct} onSelect={(product) => setSelectedSku(product.sku)} onRun={runCycle} onOpenRuns={() => setView("workspace")} search={search} setSearch={setSearch} readOnly={readOnly} />;
+  }, [view, products, selectedProduct, runs, selectedRun, timeline, approvals, approvalHistory, readOnly, comment, market, busy, search]);
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">C</span><span><strong>CommercePilot</strong><small>Agent operations</small></span></div>
-        <nav><p>Workspace</p>{NAV_ITEMS.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span>{item.id === "workspace" && approvals.length > 0 && <b>{approvals.length}</b>}</button>)}</nav>
+        <nav><p>Workspace</p>{NAV_ITEMS.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{readOnly && item.id === "market" ? "Market signals" : item.label}</span>{!readOnly && item.id === "workspace" && approvals.length > 0 && <b>{approvals.length}</b>}</button>)}</nav>
         <div className="governance-note"><span><Icon name="check" /></span><p><strong>Governed execution</strong>Price, catalog, and campaign actions require human approval.</p></div>
       </aside>
       <main className="main-content">
-        <div className="topbar"><span>NovaCart / {NAV_ITEMS.find((item) => item.id === view)?.label}</span><div className="topbar-actions"><button className="icon-button" onClick={refresh} aria-label="Refresh data"><Icon name="refresh" /></button><span className="operator">AN</span></div></div>
+        <div className="topbar"><span>NovaCart / {readOnly && view === "market" ? "Market signals" : NAV_ITEMS.find((item) => item.id === view)?.label}</span><div className="topbar-actions"><button className="icon-button" onClick={refresh} aria-label="Refresh data"><Icon name="refresh" /></button>{readOnly ? <span className="record-count">Read-only demo</span> : <span className="operator">AN</span>}</div></div>
         {notice && <div className={`notice notice-${notice.tone}`}><span>{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Dismiss"><Icon name="close" /></button></div>}
         {loading ? <div className="loading-state"><span></span><p>Loading commerce intelligence…</p></div> : page}
       </main>

@@ -6,6 +6,10 @@ recommends based on customer feedback and competitor pricing. Agents can draft
 changes. A human decides whether to publish catalog copy, launch a campaign,
 or change a price.
 
+**[Try the live read-only demo](https://commercepilot-akhil.duckdns.org/).**
+Select **NovaSound Pro → View run history → Run 7E14312C** to replay a
+completed cycle with catalog, campaign, and price-change approvals.
+
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB)
 ![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1C3C3C)
 ![React](https://img.shields.io/badge/UI-React-087EA4)
@@ -106,6 +110,7 @@ while the usual approval checks still govern execution. Use
 | --- | --- |
 | `COMMERCEPILOT_OPENAI_API_KEY` | API key used for live generation and verification |
 | `COMMERCEPILOT_OPENAI_MODEL` | Configured model, with `gpt-5-mini` as the repository default |
+| `COMMERCEPILOT_READ_ONLY_DEMO` | Blocks API writes and enables saved-run replay in the web UI |
 | `COMMERCEPILOT_DATABASE_URL` | SQLAlchemy connection for host-run Python processes |
 | `COMMERCEPILOT_MCP_BASE_URL` | Go tool server address for host-run Python processes |
 | `COMMERCEPILOT_MCP_DATABASE_URL` | PostgreSQL address for the Go server when run on the host |
@@ -115,6 +120,18 @@ while the usual approval checks still govern execution. Use
 Compose injects container-network database and MCP addresses. The bundled
 dashboard proxies `/api/` through Nginx, so the browser uses the dashboard's
 origin.
+
+### Preview the public demo
+
+Complete a run with catalog and campaign approvals in your local stack. Then
+start the same stack with `COMMERCEPILOT_READ_ONLY_DEMO=true` and refresh the
+dashboard. The API rejects write requests and the UI shows saved timelines,
+catalog diffs, and campaign previews. To return to local operator mode, start
+the stack with `COMMERCEPILOT_READ_ONLY_DEMO=false`.
+
+Use only synthetic data and demo approval comments in a public database.
+The [GCP deployment guide](docs/deployment.md) describes the separate public
+and operator entry points. Only the private API can queue work for the worker.
 
 ## Evaluation and verification
 

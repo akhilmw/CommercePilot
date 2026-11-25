@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     )
 
     environment: str = "local"
+    read_only_demo: bool = False
     database_url: str = (
         "postgresql+psycopg://commercepilot:commercepilot@localhost:5432/commercepilot"
     )

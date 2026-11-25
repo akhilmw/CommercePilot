@@ -23,6 +23,7 @@ services:
     command: ["alembic", "upgrade", "head"]
     environment: &python-environment
       COMMERCEPILOT_ENVIRONMENT: ${COMMERCEPILOT_ENVIRONMENT:-local}
+      COMMERCEPILOT_READ_ONLY_DEMO: ${COMMERCEPILOT_READ_ONLY_DEMO:-false}
       COMMERCEPILOT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commercepilot}:${POSTGRES_PASSWORD:-commercepilot}@db:5432/${POSTGRES_DB:-commercepilot}
       COMMERCEPILOT_MCP_BASE_URL: http://mcp:8081
       COMMERCEPILOT_OPENAI_API_KEY: ${COMMERCEPILOT_OPENAI_API_KEY:-}
