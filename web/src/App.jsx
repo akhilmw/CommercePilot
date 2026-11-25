@@ -66,7 +66,7 @@ function Stat({ label, value, detail, tone = "default" }) {
   return <article className={`stat-card stat-${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, search, setSearch, readOnly }) {
+function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, onAddReview, busy, search, setSearch, readOnly }) {
   const filtered = products.filter((product) =>
     `${product.name} ${product.sku} ${product.category}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -127,6 +127,7 @@ function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, sea
                 <div><dt>Latest run</dt><dd>{selected.latest_run ? shortId(selected.latest_run.id) : "None"}</dd></div>
               </dl>
               {!readOnly && <>
+                <ReviewSimulator key={selected.sku} product={selected} onAddReview={onAddReview} busy={busy} />
                 <div className="detail-note"><strong>Independent workflow</strong><p>A new cycle analyzes only this SKU and preserves every decision in its own run history.</p></div>
                 <button className="button primary full" onClick={() => onRun(selected)}><Icon name="play" />Run intelligence cycle</button>
               </>}
@@ -136,6 +137,58 @@ function ProductPortfolio({ products, selected, onSelect, onRun, onOpenRuns, sea
         </aside>
       </div>
     </>
+  );
+}
+
+function ReviewSimulator({ product, onAddReview, busy }) {
+  const [rating, setRating] = useState("2");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    if (await onAddReview(product, { rating: Number(rating), title, body })) {
+      setTitle("");
+      setBody("");
+    }
+  }
+
+  return (
+    <details className="review-simulator">
+      <summary>Review simulator</summary>
+      <form className="simulator-form" onSubmit={submit}>
+        <p className="review-hint">Add synthetic feedback for {product.name}. The next run will include it.</p>
+        <label><span>Rating</span><select value={rating} onChange={(event) => setRating(event.target.value)}>
+          {[1, 2, 3, 4, 5].map((stars) => <option key={stars} value={stars}>{stars} / 5</option>)}
+        </select></label>
+        <label><span>Title (optional)</span><input maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+        <label className="review-text"><span>Review</span><textarea required rows={3} minLength={10} maxLength={1000} value={body} onChange={(event) => setBody(event.target.value)} /></label>
+        <button className="button secondary full" disabled={busy || body.trim().length < 10}>Add simulated review</button>
+      </form>
+    </details>
+  );
+}
+
+function ReviewFindings({ insight }) {
+  if (!insight) return null;
+  return (
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Review Agent findings</h2><p>Sentiment: {insight.overall_sentiment}</p></div></div>
+      <div className="diff-stack review-findings">
+        <p>{insight.executive_summary}</p>
+        {[
+          ["Complaints", insight.complaints],
+          ["Strengths", insight.strengths],
+        ].map(([label, themes]) => (
+          <div key={label}>
+            <h3>{label}</h3>
+            {themes?.length ? <ul>{themes.map((theme, index) => (
+              <li key={`${theme.theme}-${index}`}><strong>{theme.theme}</strong><p>{theme.summary}</p><small>{theme.evidence_review_ids.length} cited reviews</small></li>
+            ))}</ul> : <p>No themes recorded.</p>}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -210,6 +263,7 @@ function RunWorkspace({ product, runs, selectedRun, timeline, approvals, approva
               {!readOnly && runApproval ? <ApprovalPanel approval={runApproval} comment={comment} setComment={setComment} onDecision={onDecision} /> : (
                 <RunSummary run={selectedRun} />
               )}
+              <ReviewFindings insight={selectedRun.result?.review_insight} />
               {savedReviews.map((approval) => (
                 <ApprovalPanel key={approval.id} approval={approval} readOnly />
               ))}
@@ -425,10 +479,23 @@ export default function App() {
     } catch (error) { setNotice({ tone: "error", text: error.message }); } finally { setBusy(false); }
   };
 
+  const addReview = async (product, payload) => {
+    setBusy(true);
+    try {
+      await api.createReview(product.sku, payload);
+      setNotice({ tone: "success", text: `Review added for ${product.name}. It will be included in the next run.` });
+      await refresh();
+      return true;
+    } catch (error) {
+      setNotice({ tone: "error", text: error.message });
+      return false;
+    } finally { setBusy(false); }
+  };
+
   const page = useMemo(() => {
     if (view === "workspace") return <RunWorkspace product={selectedProduct} runs={runs} selectedRun={selectedRun} timeline={timeline?.run_id === selectedRun?.id ? timeline : null} approvals={approvals} approvalHistory={approvalHistory} readOnly={readOnly} onSelectRun={(run) => setSelectedRunId(run.id)} onDecision={decide} comment={comment} setComment={setComment} />;
     if (view === "market") return <MarketSimulator product={selectedProduct} market={market} onSubmit={simulate} submitting={busy} readOnly={readOnly} />;
-    return <ProductPortfolio products={products} selected={selectedProduct} onSelect={(product) => setSelectedSku(product.sku)} onRun={runCycle} onOpenRuns={() => setView("workspace")} search={search} setSearch={setSearch} readOnly={readOnly} />;
+    return <ProductPortfolio products={products} selected={selectedProduct} onSelect={(product) => setSelectedSku(product.sku)} onRun={runCycle} onOpenRuns={() => setView("workspace")} onAddReview={addReview} busy={busy} search={search} setSearch={setSearch} readOnly={readOnly} />;
   }, [view, products, selectedProduct, runs, selectedRun, timeline, approvals, approvalHistory, readOnly, comment, market, busy, search]);
 
   return (

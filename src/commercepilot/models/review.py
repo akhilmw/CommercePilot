@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from commercepilot.models.enums import ImprovementPriority, ReviewSentiment
 
@@ -24,6 +25,23 @@ class ReviewCreate(BaseModel):
     @classmethod
     def strip_optional_text(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
+
+
+class SimulatedReviewCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: int = Field(ge=1, le=5)
+    title: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] = ""
+    body: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=10, max_length=1000)
+    ]
+
+    @field_validator("title", "body")
+    @classmethod
+    def reject_null_characters(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("Review text cannot contain null characters.")
+        return value
 
 
 class ReviewRead(ReviewCreate):

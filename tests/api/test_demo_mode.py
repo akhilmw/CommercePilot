@@ -24,6 +24,7 @@ def demo_mode(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "/api/runs/00000000-0000-0000-0000-000000000001"
         "/approvals/00000000-0000-0000-0000-000000000002",
         "/api/products/NOVA-HOME-001/market/snapshots",
+        "/api/products/NOVA-HOME-001/reviews",
     ],
 )
 def test_demo_rejects_mutations_before_request_validation(

@@ -47,4 +47,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  createReview: (sku, body) =>
+    request(`/api/products/${sku}/reviews`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

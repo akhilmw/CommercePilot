@@ -10,6 +10,7 @@ from commercepilot.db.session import get_db
 from commercepilot.main import app
 from commercepilot.models.dashboard import ProductPortfolioItem
 from commercepilot.models.enums import OrchestrationRunStatus, ProductStatus
+from commercepilot.models.review import ReviewIngestionResult
 from commercepilot.services.product_portfolio import PortfolioProductNotFoundError
 
 
@@ -102,4 +103,31 @@ def test_read_product_runs_returns_404_for_unknown_product(
 def test_read_product_runs_validates_limit() -> None:
     response = client.get("/api/products/NOVA-AUDIO-001/runs?limit=0")
 
+    assert response.status_code == 422
+
+
+@patch("commercepilot.api.products.ingest_reviews")
+def test_operator_can_append_simulated_review(ingest: MagicMock) -> None:
+    ingest.return_value = ReviewIngestionResult(
+        product_sku="NOVA-WEAR-001", received=1, created=1, skipped=0
+    )
+    response = client.post(
+        "/api/products/nova-wear-001/reviews",
+        json={"rating": 2, "body": "The watch strap irritated my wrist."},
+    )
+    assert response.status_code == 201
+    session, sku, reviews = ingest.call_args.args
+    assert sku == "NOVA-WEAR-001"
+    assert len(reviews) == 1
+    assert reviews[0].source == "review_simulator"
+    assert reviews[0].rating == 2
+    assert reviews[0].verified_purchase is False
+    session.commit.assert_called_once()
+
+
+def test_simulated_review_rejects_invalid_input() -> None:
+    response = client.post(
+        "/api/products/NOVA-WEAR-001/reviews",
+        json={"rating": 2, "body": "There is a null\x00 character here."},
+    )
     assert response.status_code == 422

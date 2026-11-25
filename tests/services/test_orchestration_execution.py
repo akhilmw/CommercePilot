@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 from langgraph.types import Interrupt
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 from commercepilot.db.models import ApprovalRequest, OrchestrationRun, Product
@@ -16,6 +17,7 @@ from commercepilot.services.orchestration_execution import (
     claim_orchestration_run,
     record_approval_interrupt,
     record_run_completion,
+    record_run_failure,
 )
 
 
@@ -114,7 +116,9 @@ def test_claim_decided_approval_builds_resume_command_input() -> None:
 def test_record_interrupt_creates_pending_approval() -> None:
     session = MagicMock(spec=Session)
     run, _ = make_run()
-    run.status = OrchestrationRunStatus.RUNNING
+    run.status = OrchestrationRunStatus.FAILED
+    run.completed_at = datetime.now(UTC)
+    run.error = "Previous persistence failure"
     session.get.return_value = run
     session.scalar.return_value = None
     interrupt = Interrupt(
@@ -122,6 +126,7 @@ def test_record_interrupt_creates_pending_approval() -> None:
         value={
             "type": "campaign_launch_approval_required",
             "product_sku": "NOVA-AUDIO-001",
+            "preview": {"objective": "Review\x00 the evidence."},
         },
     )
 
@@ -129,16 +134,26 @@ def test_record_interrupt_creates_pending_approval() -> None:
         session,
         run.id,
         interrupt,
-        {"product_sku": "NOVA-AUDIO-001", "__interrupt__": (interrupt,)},
+        {
+            "product_sku": "NOVA-AUDIO-001",
+            "strategy": {"findings": ["Kinetic\x00 dropped its price."]},
+            "__interrupt__": (interrupt,),
+        },
     )
 
     approval = session.add.call_args.args[0]
     assert isinstance(approval, ApprovalRequest)
     assert approval.interrupt_id == interrupt.id
     assert approval.status is ApprovalRequestStatus.PENDING
+    assert approval.payload["preview"]["objective"] == "Review the evidence."
     assert run.status is OrchestrationRunStatus.AWAITING_APPROVAL
     assert run.current_stage == "campaign_launch_approval_required"
-    assert run.result == {"product_sku": "NOVA-AUDIO-001"}
+    assert run.completed_at is None
+    assert run.error is None
+    assert run.result == {
+        "product_sku": "NOVA-AUDIO-001",
+        "strategy": {"findings": ["Kinetic dropped its price."]},
+    }
     session.commit.assert_called_once()
 
 
@@ -162,4 +177,22 @@ def test_record_completion_stores_json_safe_result() -> None:
         "error": None,
     }
     assert run.completed_at is not None
+    session.commit.assert_called_once()
+
+
+def test_record_database_failure_does_not_expose_query_parameters() -> None:
+    session = MagicMock(spec=Session)
+    run, _ = make_run()
+    session.get.return_value = run
+
+    record_run_failure(
+        session,
+        run.id,
+        DataError(
+            "UPDATE orchestration_runs", {"result": "internal payload"}, ValueError()
+        ),
+    )
+
+    assert run.status is OrchestrationRunStatus.FAILED
+    assert run.error == "CommercePilot could not save the run to PostgreSQL."
     session.commit.assert_called_once()

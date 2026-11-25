@@ -165,7 +165,7 @@ def record_approval_interrupt(
     if not isinstance(interrupt.value, dict):
         raise ValueError("Approval interrupt payload must be an object.")
 
-    payload = jsonable_encoder(interrupt.value)
+    payload = encode_run_payload(interrupt.value)
     approval_type = str(payload.get("type", "human_approval_required"))
     existing = session.scalar(
         select(ApprovalRequest).where(
@@ -191,6 +191,8 @@ def record_approval_interrupt(
     run.status = OrchestrationRunStatus.AWAITING_APPROVAL
     run.current_stage = approval_type
     run.result = serialize_graph_result(partial_result)
+    run.completed_at = None
+    run.error = None
     session.commit()
 
 
@@ -220,15 +222,42 @@ def record_run_failure(
         return
     run.status = OrchestrationRunStatus.FAILED
     run.current_stage = "failed"
-    run.error = str(error)
+    if isinstance(error, SQLAlchemyError):
+        logger.error(
+            "Database error for orchestration run %s: %s", run_id, type(error).__name__
+        )
+        run.error = "CommercePilot could not save the run to PostgreSQL."
+    else:
+        run.error = str(error).replace("\x00", "")
     run.completed_at = datetime.now(UTC)
     session.commit()
 
 
 def serialize_graph_result(result: dict[str, Any]) -> dict[str, Any]:
-    return jsonable_encoder(
+    return encode_run_payload(
         {key: value for key, value in result.items() if key != "__interrupt__"}
     )
+
+
+def encode_run_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return _remove_json_null_characters(jsonable_encoder(payload))
+
+
+def _remove_json_null_characters(value: Any) -> Any:
+    # JSONB cannot represent a literal null character, even as a JSON escape.
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_remove_json_null_characters(item) for item in value]
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            clean_key = key.replace("\x00", "")
+            if clean_key in cleaned:
+                raise ValueError("Run output contains conflicting JSON field names.")
+            cleaned[clean_key] = _remove_json_null_characters(item)
+        return cleaned
+    return value
 
 
 async def execute_orchestration_run(run_id: UUID) -> bool:

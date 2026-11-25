@@ -184,6 +184,15 @@ td > small, .product-cell small { display: block; margin-top: 4px; color: var(--
 .simulation-impact span, .simulation-impact strong { display: block; }
 .simulation-impact strong { margin-top: 5px; color: var(--ink); line-height: 1.4; }
 .simulator-form .button.full { width: 100%; margin: 0; }
+.review-simulator { margin: 0 20px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.review-simulator summary { padding: 12px; cursor: pointer; font-weight: 600; }
+.review-simulator .simulator-form { padding: 0 12px 12px; gap: 10px; }
+.review-hint, .review-findings p, .review-findings small { color: var(--muted); font-size: 0.84rem; line-height: 1.5; }
+.review-hint, .review-findings p { margin: 0; }
+.review-text textarea { width: 100%; padding: 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 9px; resize: vertical; }
+.review-findings h3 { margin: 0; font-size: 0.9rem; }
+.review-findings ul { margin: 8px 0 0; padding-left: 20px; }
+.review-findings li + li { margin-top: 10px; }
 .form-footnote { margin: 0; padding: 0 20px 20px; color: var(--muted); font-size: 0.75rem; line-height: 1.45; }
 
 .notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding: 12px 14px; border: 1px solid; border-radius: 10px; font-size: 0.84rem; }

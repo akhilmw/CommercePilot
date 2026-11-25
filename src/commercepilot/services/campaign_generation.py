@@ -1,9 +1,11 @@
 import json
 import re
 import unicodedata
+from collections import Counter
 from uuid import UUID
 
 from openai import OpenAI
+from pydantic import ValidationError
 
 from commercepilot.core.model_usage import parse_model_response
 from commercepilot.models.campaign import (
@@ -88,6 +90,11 @@ CHANNEL_COPY_LIMITS = {
     "paid_search": (30, 90),
 }
 MAX_CAMPAIGN_GENERATION_ATTEMPTS = 2
+MAX_CAMPAIGN_VERIFICATION_ATTEMPTS = 2
+
+
+class CampaignVerificationResponseError(ValueError):
+    """The verifier response could not be matched to the draft's claims."""
 
 
 def _campaign_claim_guardrails(
@@ -324,38 +331,48 @@ def verify_campaign_draft_semantics(
     model: str,
 ) -> CampaignSemanticVerification:
     claims = _campaign_claims(draft)
-    response = parse_model_response(
-        client,
-        model=model,
-        instructions=CAMPAIGN_VERIFICATION_INSTRUCTIONS,
-        input=json.dumps(
-            {
-                "claims": [claim.model_dump(mode="json") for claim in claims],
-                "evidence": evidence.model_dump(mode="json"),
-            }
-        ),
-        text_format=CampaignSemanticVerification,
+    expected_ids = [claim.claim_id for claim in claims]
+    expected_counts = Counter(expected_ids)
+    request: dict[str, object] = {
+        "claims": [claim.model_dump(mode="json") for claim in claims],
+        "expected_claim_ids": expected_ids,
+        "evidence": evidence.model_dump(mode="json"),
+    }
+    for _ in range(MAX_CAMPAIGN_VERIFICATION_ATTEMPTS):
+        try:
+            response = parse_model_response(
+                client,
+                model=model,
+                instructions=CAMPAIGN_VERIFICATION_INSTRUCTIONS,
+                input=json.dumps(request),
+                text_format=CampaignSemanticVerification,
+            )
+            verification = response.output_parsed
+        except ValidationError:
+            verification = None
+
+        if verification is not None and Counter(
+            result.claim_id for result in verification.results
+        ) == expected_counts:
+            unsupported = [
+                result for result in verification.results if not result.supported
+            ]
+            if unsupported:
+                details = "; ".join(
+                    f"{result.claim_id}: {result.rationale}" for result in unsupported
+                )
+                raise ValueError(f"Campaign semantic verification failed: {details}")
+            return verification
+
+        request["correction_required"] = (
+            "The previous response was incomplete or malformed. Verify these same "
+            "claims against their evidence. Return exactly one result per ID in "
+            "expected_claim_ids, copying each ID verbatim."
+        )
+
+    raise CampaignVerificationResponseError(
+        "Campaign verifier did not return a complete set of claim results after retry."
     )
-    verification = response.output_parsed
-    if verification is None:
-        raise ValueError("The model returned no campaign evidence verification.")
-
-    expected_ids = {claim.claim_id for claim in claims}
-    returned_ids = [result.claim_id for result in verification.results]
-    if len(returned_ids) != len(set(returned_ids)):
-        raise ValueError("Campaign verifier returned duplicate claim IDs.")
-    if set(returned_ids) != expected_ids:
-        raise ValueError(
-            "Campaign verifier did not return exactly the requested claim IDs."
-        )
-
-    unsupported = [result for result in verification.results if not result.supported]
-    if unsupported:
-        details = "; ".join(
-            f"{result.claim_id}: {result.rationale}" for result in unsupported
-        )
-        raise ValueError(f"Campaign semantic verification failed: {details}")
-    return verification
 
 
 def generate_campaign_draft(
@@ -386,6 +403,8 @@ def generate_campaign_draft(
             try:
                 validate_campaign_draft(draft, evidence)
                 verify_campaign_draft_semantics(draft, evidence, client, model)
+            except CampaignVerificationResponseError:
+                raise
             except ValueError as error:
                 last_error = error
             else:

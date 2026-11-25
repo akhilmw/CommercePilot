@@ -27,6 +27,7 @@ from commercepilot.models.orchestration import ActionProposal, CommerceStrategy
 from commercepilot.models.product import ProductRead
 from commercepilot.models.review import ReviewInsight, ReviewTheme
 from commercepilot.services.campaign_generation import (
+    CampaignVerificationResponseError,
     generate_campaign_draft,
     validate_campaign_draft,
     verify_campaign_draft_semantics,
@@ -309,6 +310,58 @@ def test_semantic_verifier_rejects_unsupported_campaign_claim() -> None:
             client,
             "test-model",
         )
+
+
+@pytest.mark.parametrize("invalid_result", ["missing", "unexpected", "duplicate"])
+def test_bad_verifier_ids_retry_without_regenerating_draft(
+    invalid_result: str,
+) -> None:
+    evidence = make_evidence()
+    draft = make_draft(evidence)
+    expected = supported_verification(draft)
+    malformed = expected.model_copy(deep=True)
+    if invalid_result == "missing":
+        malformed.results.pop()
+    elif invalid_result == "unexpected":
+        malformed.results[-1].claim_id = "asset_unknown"
+    else:
+        malformed.results[-1] = malformed.results[0]
+    client = MagicMock()
+    client.responses.parse.side_effect = [
+        MagicMock(output_parsed=draft),
+        MagicMock(output_parsed=malformed),
+        MagicMock(output_parsed=expected),
+    ]
+
+    assert generate_campaign_draft(evidence, client, "test-model") == draft
+
+    calls = [call.kwargs for call in client.responses.parse.call_args_list]
+    assert [call["text_format"] for call in calls] == [
+        CampaignDraft,
+        CampaignSemanticVerification,
+        CampaignSemanticVerification,
+    ]
+    first, second = [json.loads(call["input"]) for call in calls[1:]]
+    assert second.pop("correction_required")
+    assert first == second
+
+
+def test_campaign_fails_closed_if_verifier_retry_is_incomplete() -> None:
+    evidence = make_evidence()
+    draft = make_draft(evidence)
+    incomplete = supported_verification(draft)
+    incomplete.results.pop()
+    client = MagicMock()
+    client.responses.parse.side_effect = [
+        MagicMock(output_parsed=draft),
+        MagicMock(output_parsed=incomplete),
+        MagicMock(output_parsed=incomplete),
+    ]
+
+    with pytest.raises(CampaignVerificationResponseError, match="after retry"):
+        generate_campaign_draft(evidence, client, "test-model")
+
+    assert client.responses.parse.call_count == 3
 
 
 def test_generate_campaign_retries_invalid_customer_copy() -> None:
